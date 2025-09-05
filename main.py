@@ -135,8 +135,7 @@ async def stream_generator(messages: list):
     for tool_call in assistant_message["tool_calls"]:
         tool_name = tool_call["function"]["name"]
 
-        # 可以在這裡先傳送一個狀態訊息給前端
-        yield f"\n\n[正在執行工具: {tool_name}...]\n\n"
+        # 不再傳送工具執行狀態訊息，直接執行工具
 
         if tool_name in available_tools:
             function_to_call = available_tools[tool_name]
@@ -165,6 +164,8 @@ async def stream_generator(messages: list):
 
     # 如果所有工具都成功執行，才將結果加入 messages
     messages.extend(tool_results)
+
+    # 不再需要傳送工具完成信號，直接進入最終回覆
 
     # === 步驟 4: 第二次呼叫 OpenAI，整合工具結果生成最終答案 ===
     try:

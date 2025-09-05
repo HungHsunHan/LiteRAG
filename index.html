@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>最輕量 AI 助理</title>
+    <!-- 引入 marked.js 來處理 Markdown 渲染 -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         :root {
             --bg-color: #f0f2f5;
@@ -114,6 +116,109 @@
             background-color: #a0c7ff;
             cursor: not-allowed;
         }
+
+        /* Markdown 渲染後的樣式 */
+        .assistant-message h1,
+        .assistant-message h2,
+        .assistant-message h3,
+        .assistant-message h4,
+        .assistant-message h5,
+        .assistant-message h6 {
+            margin: 0.5rem 0 0.3rem 0;
+            color: #2c3e50;
+            font-weight: 600;
+        }
+        
+        .assistant-message h3 {
+            font-size: 1.1rem;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 0.2rem;
+        }
+
+        .assistant-message p {
+            margin: 0.5rem 0;
+            line-height: 1.5;
+        }
+
+        .assistant-message ul,
+        .assistant-message ol {
+            margin: 0.5rem 0 0.5rem 1.2rem;
+            padding-left: 0;
+        }
+
+        .assistant-message li {
+            margin: 0.3rem 0;
+            line-height: 1.4;
+        }
+
+        .assistant-message strong {
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .assistant-message em {
+            font-style: italic;
+            color: #5a6c7d;
+        }
+
+        .assistant-message code {
+            background-color: #f4f4f4;
+            padding: 0.2rem 0.4rem;
+            border-radius: 3px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 0.9rem;
+            color: #d63384;
+        }
+
+        .assistant-message pre {
+            background-color: #f8f9fa;
+            padding: 0.8rem;
+            border-radius: 5px;
+            overflow-x: auto;
+            margin: 0.5rem 0;
+            border-left: 4px solid #007bff;
+        }
+
+        .assistant-message pre code {
+            background-color: transparent;
+            padding: 0;
+            color: #495057;
+        }
+
+        .assistant-message hr {
+            border: none;
+            border-top: 1px solid #dee2e6;
+            margin: 1rem 0;
+        }
+
+        .assistant-message blockquote {
+            border-left: 4px solid #6c757d;
+            padding-left: 1rem;
+            margin: 0.5rem 0;
+            font-style: italic;
+            color: #6c757d;
+        }
+
+        .assistant-message a {
+            color: #007bff;
+            text-decoration: none;
+        }
+
+        .assistant-message a:hover {
+            text-decoration: underline;
+        }
+
+        /* 工具執行狀態樣式 */
+        .tool-status {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 4px;
+            padding: 0.5rem;
+            margin: 0.5rem 0;
+            color: #856404;
+            font-style: italic;
+            font-size: 0.9rem;
+        }
     </style>
 </head>
 <body>
@@ -214,13 +319,30 @@
                     if (done) break;
 
                     const chunk = decoder.decode(value, { stream: true });
+                    
+                    // 跳過工具狀態訊息，只處理實際的回覆內容
+                    if (chunk.trim().startsWith('{') && chunk.includes('"type":')) {
+                        try {
+                            const statusData = JSON.parse(chunk.trim());
+                            if (statusData.type === 'tool_status' || statusData.type === 'tools_completed') {
+                                // 忽略所有工具相關的狀態訊息
+                                continue;
+                            }
+                        } catch (e) {
+                            // 如果不是有效的 JSON，當作普通內容處理
+                        }
+                    }
+                    
                     currentContent += chunk;
-                    assistantMessageDiv.textContent = currentContent; // 即時更新畫面
+                    
+                    // 即時渲染 Markdown 內容
+                    assistantMessageDiv.innerHTML = marked.parse(currentContent);
                     scrollToBottom();
                 }
             } catch (streamError) {
                 console.error('串流處理錯誤:', streamError);
-                assistantMessageDiv.textContent = currentContent + '\n\n[串流中斷，回應可能不完整]';
+                const errorContent = currentContent + '\n\n[串流中斷，回應可能不完整]';
+                assistantMessageDiv.innerHTML = marked.parse(errorContent);
                 throw streamError; // 重新拋出錯誤以觸發外層 catch
             }
         } catch (error) {
@@ -241,7 +363,7 @@
                 errorMessage = currentContent + '\n\n[回應未完成，請重新詢問]';
             }
             
-            assistantMessageDiv.textContent = errorMessage;
+            assistantMessageDiv.innerHTML = marked.parse(errorMessage);
         } finally {
             // 串流結束後，將用戶查詢和 AI 回覆都存入歷史紀錄
             conversationHistory.push({ role: 'user', content: userQuery });
@@ -258,7 +380,13 @@
      */
     function displayMessage(role, content) {
         const messageDiv = createMessageDiv(role);
-        messageDiv.textContent = content;
+        if (role === 'assistant') {
+            // AI 回覆使用 Markdown 渲染
+            messageDiv.innerHTML = marked.parse(content);
+        } else {
+            // 用戶訊息保持純文字
+            messageDiv.textContent = content;
+        }
         scrollToBottom();
     }
     
