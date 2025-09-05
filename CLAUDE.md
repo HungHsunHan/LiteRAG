@@ -1,0 +1,1 @@
+## python環境需使用: /usr/local/Caskroom/miniforge/base/envs/llm

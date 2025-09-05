@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>最輕量 AI 助理</title>
+    <style>
+        :root {
+            --bg-color: #f0f2f5;
+            --chat-bg: #ffffff;
+            --user-msg-bg: #dcf8c6;
+            --assistant-msg-bg: #f1f0f0;
+            --text-color: #1c1e21;
+            --border-color: #ddd;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        #chat-container {
+            width: 90%;
+            max-width: 700px;
+            height: 90vh;
+            background-color: var(--chat-bg);
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        #header {
+            padding: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        #header h1 {
+            font-size: 1.2rem;
+            margin: 0;
+            color: var(--text-color);
+        }
+        #new-chat-button {
+            padding: 8px 12px;
+            border: 1px solid var(--border-color);
+            background-color: #fff;
+            color: var(--text-color);
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: background-color 0.2s;
+        }
+        #new-chat-button:hover {
+            background-color: #f5f5f5;
+        }
+        #chat-box {
+            flex-grow: 1;
+            padding: 1rem;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+        .message {
+            max-width: 75%;
+            padding: 10px 15px;
+            border-radius: 18px;
+            margin-bottom: 10px;
+            line-height: 1.4;
+            word-wrap: break-word;
+        }
+        .user-message {
+            background-color: var(--user-msg-bg);
+            align-self: flex-end;
+            border-bottom-right-radius: 4px;
+        }
+        .assistant-message {
+            background-color: var(--assistant-msg-bg);
+            align-self: flex-start;
+            border-bottom-left-radius: 4px;
+        }
+        #chat-form {
+            display: flex;
+            padding: 1rem;
+            border-top: 1px solid var(--border-color);
+        }
+        #user-input {
+            flex-grow: 1;
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            font-size: 1rem;
+            outline: none;
+        }
+        #user-input:focus {
+            border-color: #007bff;
+        }
+        #chat-form button {
+            padding: 10px 20px;
+            margin-left: 10px;
+            border: none;
+            background-color: #007bff;
+            color: white;
+            border-radius: 20px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        #chat-form button:disabled {
+            background-color: #a0c7ff;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+
+<div id="chat-container">
+    <div id="header">
+        <h1>AI 助理</h1>
+        <button id="new-chat-button">開啟新對話</button>
+    </div>
+    <div id="chat-box">
+        </div>
+    <form id="chat-form">
+        <input type="text" id="user-input" placeholder="在這裡輸入訊息..." autocomplete="off">
+        <button type="submit">發送</button>
+    </form>
+</div>
+
+<script>
+    // -------------------------------------------------------------
+    // 1. 元素選取與狀態管理
+    // -------------------------------------------------------------
+    const chatBox = document.getElementById('chat-box');
+    const chatForm = document.getElementById('chat-form');
+    const userInput = document.getElementById('user-input');
+    const newChatButton = document.getElementById('new-chat-button');
+    const sendButton = chatForm.querySelector('button');
+
+    // 關鍵！用這個陣列來保存對話歷史，實現「記憶」功能
+    let conversationHistory = [];
+    const API_URL = 'http://127.0.0.1:8000/chat/stream';
+
+    // -------------------------------------------------------------
+    // 2. 事件監聽
+    // -------------------------------------------------------------
+
+    // 監聽表單提交事件
+    chatForm.addEventListener('submit', async (e) => {
+        e.preventDefault(); // 防止頁面刷新
+        const userQuery = userInput.value.trim();
+        if (!userQuery) return;
+
+        // 顯示使用者訊息
+        displayMessage('user', userQuery);
+        
+        userInput.value = ''; // 清空輸入框
+        toggleForm(true); // 禁用表單
+
+        await getAIResponse(userQuery); // 呼叫後端取得 AI 回覆
+        
+        toggleForm(false); // 啟用表單
+    });
+
+    // 監聽新對話按鈕點擊事件
+    newChatButton.addEventListener('click', () => {
+        chatBox.innerHTML = ''; // 清空聊天視窗
+        conversationHistory = []; // 清空歷史紀錄
+        displayMessage('assistant', '你好！我是一個全新的對話助理，請問有什麼可以幫你的嗎？');
+        toggleForm(false);
+    });
+
+
+    // -------------------------------------------------------------
+    // 3. 核心功能函式
+    // -------------------------------------------------------------
+
+    /**
+     * 向後端 API 發送請求並處理串流回覆
+     * @param {string} userQuery - 使用者的查詢
+     */
+    async function getAIResponse(userQuery) {
+        // 建立一個空的 AI 訊息 div，稍後用來填入串流內容
+        const assistantMessageDiv = createMessageDiv('assistant');
+        let currentContent = '';
+
+        try {
+            const response = await fetch(API_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    query: userQuery,
+                    history: conversationHistory // 傳送完整的對話歷史
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`伺服器錯誤: ${response.status} ${response.statusText}`);
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder('utf-8');
+
+            // 處理串流數據
+            try {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value, { stream: true });
+                    currentContent += chunk;
+                    assistantMessageDiv.textContent = currentContent; // 即時更新畫面
+                    scrollToBottom();
+                }
+            } catch (streamError) {
+                console.error('串流處理錯誤:', streamError);
+                assistantMessageDiv.textContent = currentContent + '\n\n[串流中斷，回應可能不完整]';
+                throw streamError; // 重新拋出錯誤以觸發外層 catch
+            }
+        } catch (error) {
+            console.error('API 請求失敗:', error);
+            
+            // 根據錯誤類型提供更具體的錯誤訊息
+            let errorMessage = '抱歉，發生了錯誤。';
+            
+            if (error.name === 'NetworkError' || error.message.includes('Failed to fetch')) {
+                errorMessage = '網路連線異常，請檢查網路狀態後再試。';
+            } else if (error.message.includes('500')) {
+                errorMessage = '伺服器內部錯誤，請稍後再試。';
+            } else if (error.message.includes('429')) {
+                errorMessage = '請求太過頻繁，請稍後再試。';
+            } else if (error.message.includes('401') || error.message.includes('403')) {
+                errorMessage = 'API 認證失敗，請檢查配置。';
+            } else if (currentContent) {
+                errorMessage = currentContent + '\n\n[回應未完成，請重新詢問]';
+            }
+            
+            assistantMessageDiv.textContent = errorMessage;
+        } finally {
+            // 串流結束後，將用戶查詢和 AI 回覆都存入歷史紀錄
+            conversationHistory.push({ role: 'user', content: userQuery });
+            if (currentContent) {
+                conversationHistory.push({ role: 'assistant', content: currentContent });
+            }
+        }
+    }
+
+    /**
+     * 在聊天視窗中顯示一條訊息
+     * @param {string} role - 'user' 或 'assistant'
+     * @param {string} content - 訊息內容
+     */
+    function displayMessage(role, content) {
+        const messageDiv = createMessageDiv(role);
+        messageDiv.textContent = content;
+        scrollToBottom();
+    }
+    
+    /**
+     * 建立一個訊息 DOM 元素
+     * @param {string} role - 'user' 或 'assistant'
+     * @returns {HTMLDivElement}
+     */
+    function createMessageDiv(role) {
+        const messageDiv = document.createElement('div');
+        messageDiv.classList.add('message', `${role}-message`);
+        chatBox.appendChild(messageDiv);
+        return messageDiv;
+    }
+
+    /**
+     * 禁用或啟用輸入表單
+     * @param {boolean} disabled - 是否禁用
+     */
+    function toggleForm(disabled) {
+        userInput.disabled = disabled;
+        sendButton.disabled = disabled;
+        userInput.focus();
+    }
+
+    /**
+     * 將聊天視窗滾動到底部
+     */
+    function scrollToBottom() {
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    // -------------------------------------------------------------
+    // 4. 初始載入
+    // -------------------------------------------------------------
+    displayMessage('assistant', '你好！請問有什麼可以幫你的嗎？');
+
+</script>
+</body>
+</html>
