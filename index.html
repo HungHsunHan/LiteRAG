@@ -365,14 +365,14 @@
 
 <div id="chat-container">
     <div id="header">
-        <h1>AI 助理</h1>
-        <button id="new-chat-button">開啟新對話</button>
+        <h1>AI Chatbot</h1>
+        <button id="new-chat-button">New Session</button>
     </div>
     <div id="chat-box">
         </div>
     <form id="chat-form">
         <input type="text" id="user-input" placeholder="在這裡輸入訊息..." autocomplete="off">
-        <button type="submit">發送</button>
+        <button type="submit">Send</button>
     </form>
 </div>
 
@@ -389,6 +389,12 @@
     // 關鍵！用這個陣列來保存對話歷史，實現「記憶」功能
     let conversationHistory = [];
     const API_URL = 'http://127.0.0.1:8000/chat/stream';
+
+    // 工具名稱映射，將技術名稱轉換為用戶友好的中文名稱
+    const TOOL_NAME_MAP = {
+        'local_rag_search': '資料庫查詢',
+        'web_search': '網頁搜尋'
+    };
 
     // -------------------------------------------------------------
     // 2. 事件監聽
@@ -549,12 +555,14 @@
             case 'agent_action':
                 // 標記已使用工具
                 helpers.markToolsUsed();
-                addToolLogEntry(helpers.toolLogsContent, 'action', `開始執行工具: ${eventData.tool_name}`, eventData);
+                // 使用中文名稱顯示工具執行信息
+                const toolDisplayName = TOOL_NAME_MAP[eventData.tool_name] || eventData.tool_name;
+                addToolLogEntry(helpers.toolLogsContent, 'action', `開始執行工具: ${toolDisplayName}`, eventData);
                 expandToolLogs(helpers.toolLogsContainer);
                 break;
 
             case 'tool_end':
-                addToolLogEntry(helpers.toolLogsContent, 'result', `工具執行完成: ${eventData.tool_name}`, eventData);
+                // 不再顯示工具執行完成的信息
                 break;
 
             case 'content':
@@ -658,7 +666,7 @@
         
         const title = document.createElement('h4');
         title.classList.add('tool-logs-title');
-        title.textContent = '🔧 工具執行日誌';
+        title.textContent = '工具執行';
         
         const toggleIcon = document.createElement('span');
         toggleIcon.classList.add('toggle-icon');
@@ -747,25 +755,8 @@
         
         const messageDiv = document.createElement('div');
         
-        if (type === 'action') {
-            messageDiv.innerHTML = `
-                <span class="tool-name">${eventData.tool_name}</span> 
-                - ${message}
-                ${eventData.tool_input ? '<br><small>參數: ' + JSON.stringify(eventData.tool_input, null, 2) + '</small>' : ''}
-            `;
-        } else if (type === 'result') {
-            const truncatedOutput = eventData.tool_output && eventData.tool_output.length > 200 
-                ? eventData.tool_output.substring(0, 200) + '...'
-                : eventData.tool_output;
-            
-            messageDiv.innerHTML = `
-                <span class="tool-name">${eventData.tool_name}</span> 
-                - ${message}
-                ${truncatedOutput ? '<br><small>結果: ' + truncatedOutput + '</small>' : ''}
-            `;
-        } else {
-            messageDiv.textContent = message;
-        }
+        // 只顯示簡化的訊息，不顯示技術參數和結果
+        messageDiv.textContent = message;
         
         entry.appendChild(timestampSpan);
         entry.appendChild(messageDiv);
@@ -810,7 +801,7 @@
     // -------------------------------------------------------------
     // 4. 初始載入
     // -------------------------------------------------------------
-    displayMessage('assistant', '你好！請問有什麼可以幫你的嗎？');
+    displayMessage('assistant', 'Hello！How can I help you？');
 
 </script>
 </body>
