@@ -63,7 +63,9 @@ app = FastAPI(lifespan=lifespan)
 origins = [
     "http://localhost",
     "http://127.0.0.1",
+    "http://192.168.0.46",  # 本機局域網IP
     "null",  # 允許從本地 file:// 協議發出的請求
+    "*"  # 允許所有來源（僅用於開發測試）
 ]
 
 app.add_middleware(
@@ -88,6 +90,7 @@ client = AsyncOpenAI()
 class ChatRequest(BaseModel):
     query: str
     history: list = []  # 支援多輪對話
+    session_id: str = None  # 會話ID，用於區分不同用戶
 
 
 async def stream_generator(messages: list):
@@ -264,6 +267,10 @@ async def chat_stream(chat_request: ChatRequest):
     """
     API 端點，接收請求並返回 SSE 串流。
     """
+    # 記錄會話ID以便調試（可選）
+    if chat_request.session_id:
+        print(f"處理會話 {chat_request.session_id} 的請求: {chat_request.query[:50]}...")
+    
     messages = chat_request.history + [{"role": "user", "content": chat_request.query}]
     
     return StreamingResponse(

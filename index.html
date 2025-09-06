@@ -47,6 +47,11 @@
             margin: 0;
             color: var(--text-color);
         }
+        #session-info {
+            font-size: 0.8rem;
+            color: #888;
+            margin-top: 0.2rem;
+        }
         #new-chat-button {
             padding: 8px 12px;
             border: 1px solid var(--border-color);
@@ -365,7 +370,10 @@
 
 <div id="chat-container">
     <div id="header">
-        <h1>AI Chatbot</h1>
+        <div>
+            <h1>AI Chatbot</h1>
+            <div id="session-info">會話ID: <span id="session-id-display"></span></div>
+        </div>
         <button id="new-chat-button">New Session</button>
     </div>
     <div id="chat-box">
@@ -386,9 +394,32 @@
     const newChatButton = document.getElementById('new-chat-button');
     const sendButton = chatForm.querySelector('button');
 
+    // 生成唯一的會話ID
+    function generateSessionId() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            const r = Math.random() * 16 | 0;
+            const v = c == 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    }
+
     // 關鍵！用這個陣列來保存對話歷史，實現「記憶」功能
     let conversationHistory = [];
-    const API_URL = 'http://127.0.0.1:8000/chat/stream';
+    let sessionId = generateSessionId(); // 為每個瀏覽器會話生成唯一ID
+    
+    // 更新會話ID顯示
+    function updateSessionDisplay() {
+        const sessionDisplay = document.getElementById('session-id-display');
+        if (sessionDisplay) {
+            sessionDisplay.textContent = sessionId.substring(0, 8) + '...'; // 只顯示前8位
+        }
+    }
+    // API URL設定 - 支援本地file://協議和網路存取
+    const API_URL = window.location.protocol === 'file:' ? 
+                   'http://127.0.0.1:8000/chat/stream' : 
+                   window.location.protocol + '//' + 
+                   (window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname) + 
+                   ':8000/chat/stream';
 
     // 工具名稱映射，將技術名稱轉換為用戶友好的中文名稱
     const TOOL_NAME_MAP = {
@@ -425,6 +456,8 @@
         setTimeout(() => {
             chatBox.innerHTML = ''; // 清空聊天視窗
             conversationHistory = []; // 清空歷史紀錄
+            sessionId = generateSessionId(); // 生成新的會話ID
+            updateSessionDisplay(); // 更新會話ID顯示
             chatBox.classList.remove('fade-out');
             displayMessage('assistant', '你好！我是一個全新的對話助理，請問有什麼可以幫你的嗎？');
             toggleForm(false);
@@ -459,7 +492,8 @@
         // 構建請求體
         const requestBody = JSON.stringify({
             query: userQuery,
-            history: conversationHistory
+            history: conversationHistory,
+            session_id: sessionId
         });
 
         try {
@@ -801,6 +835,7 @@
     // -------------------------------------------------------------
     // 4. 初始載入
     // -------------------------------------------------------------
+    updateSessionDisplay(); // 初始化會話ID顯示
     displayMessage('assistant', 'Hello！How can I help you？');
 
 </script>
