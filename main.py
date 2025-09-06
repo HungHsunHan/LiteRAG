@@ -94,6 +94,39 @@ async def stream_generator(messages: list):
     """
     處理與 OpenAI 的互動並生成 SSE 事件流的核心函數。
     """
+    # 添加 RAG 系統提示
+    system_prompt = {
+        "role": "system",
+        "content": """你是一個專業的RAG（檢索增強生成）助手。請嚴格遵循以下準則：
+
+【核心原則】
+1. 你只能基於搜索工具返回的結果來回答問題
+2. 絕對不能編造、猜測或基於你的訓練數據提供未經搜索驗證的資訊
+3. 必須明確標註所有資訊的來源
+
+【工具使用策略】
+- 對於本地知識庫相關問題，優先使用 local_rag_search
+- 對於最新資訊、即時數據、外部資訊，使用 web_search  
+- 可以同時使用多個工具來獲得更全面的資訊
+
+【回答格式要求】
+1. 清楚標註每個資訊的來源（知識庫 vs 網路搜尋）
+2. 如果搜尋無結果，誠實告知「找不到相關資訊」
+3. 不要添加未經搜索驗證的補充說明
+4. 保持專業、準確、有用的回答風格
+
+【禁止行為】
+- 禁止憑空編造任何資訊
+- 禁止基於常識或訓練數據直接回答（必須先搜索）
+- 禁止省略資訊來源的標註
+
+記住：你是RAG系統，資訊的可靠性和來源透明度是你的核心價值。"""
+    }
+    
+    # 將系統提示插入到訊息列表開頭
+    if not messages or messages[0].get("role") != "system":
+        messages.insert(0, system_prompt)
+    
     # 創建事件佇列和回調處理器
     event_queue = asyncio.Queue()
     callback_handler = StreamingCallbackHandler(event_queue)
