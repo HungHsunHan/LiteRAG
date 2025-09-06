@@ -208,16 +208,156 @@
             text-decoration: underline;
         }
 
-        /* 工具執行狀態樣式 */
-        .tool-status {
-            background-color: #fff3cd;
-            border: 1px solid #ffeaa7;
+        /* 可收折的工具日誌區塊 */
+        .tool-logs-container {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            margin: 0.5rem 0;
+            overflow: hidden;
+        }
+        
+        .tool-logs-header {
+            background-color: #e9ecef;
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid #dee2e6;
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: background-color 0.2s;
+        }
+        
+        .tool-logs-header:hover {
+            background-color: #dae0e5;
+        }
+        
+        .tool-logs-title {
+            font-weight: 600;
+            color: #495057;
+            margin: 0;
+            font-size: 0.9rem;
+        }
+        
+        .toggle-icon {
+            transition: transform 0.3s;
+            color: #6c757d;
+            font-weight: bold;
+        }
+        
+        .toggle-icon.collapsed {
+            transform: rotate(-90deg);
+        }
+        
+        .tool-logs-content {
+            padding: 0.75rem;
+            max-height: 300px;
+            overflow-y: auto;
+            transition: max-height 0.3s ease-out;
+        }
+        
+        .tool-logs-content.collapsed {
+            max-height: 0;
+            padding: 0 0.75rem;
+            overflow: hidden;
+        }
+        
+        .tool-log-entry {
+            background-color: #ffffff;
+            border: 1px solid #e3e6ea;
             border-radius: 4px;
             padding: 0.5rem;
-            margin: 0.5rem 0;
+            margin: 0.25rem 0;
+            font-size: 0.85rem;
+        }
+        
+        .tool-log-action {
+            background-color: #fff3cd;
+            border-color: #ffeaa7;
             color: #856404;
+        }
+        
+        .tool-log-result {
+            background-color: #d4edda;
+            border-color: #c3e6cb;
+            color: #155724;
+        }
+        
+        .tool-log-error {
+            background-color: #f8d7da;
+            border-color: #f5c6cb;
+            color: #721c24;
+        }
+        
+        .tool-name {
+            font-weight: 600;
+            color: #007bff;
+        }
+        
+        .timestamp {
+            font-size: 0.75rem;
+            color: #6c757d;
+            float: right;
+        }
+
+        /* 載入動畫 */
+        .loading-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: #6c757d;
             font-style: italic;
             font-size: 0.9rem;
+            padding: 0.5rem;
+        }
+
+        .loading-dots {
+            display: inline-flex;
+            gap: 0.2rem;
+        }
+
+        .loading-dots span {
+            width: 4px;
+            height: 4px;
+            border-radius: 50%;
+            background-color: #007bff;
+            animation: pulse 1.4s infinite;
+        }
+
+        .loading-dots span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .loading-dots span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes pulse {
+            0%, 80%, 100% {
+                opacity: 0.3;
+                transform: scale(0.8);
+            }
+            40% {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
+        /* 新對話清理樣式 */
+        .fade-out {
+            opacity: 0;
+            transition: opacity 0.3s ease-out;
+        }
+
+        /* 回覆內容區域樣式 */
+        .response-content {
+            margin-top: 0.5rem;
+        }
+
+        /* 確保工具日誌和回覆內容之間有適當間距 */
+        .tool-logs-container + .response-content {
+            margin-top: 0.75rem;
         }
     </style>
 </head>
@@ -273,10 +413,16 @@
 
     // 監聽新對話按鈕點擊事件
     newChatButton.addEventListener('click', () => {
-        chatBox.innerHTML = ''; // 清空聊天視窗
-        conversationHistory = []; // 清空歷史紀錄
-        displayMessage('assistant', '你好！我是一個全新的對話助理，請問有什麼可以幫你的嗎？');
-        toggleForm(false);
+        // 添加淡出效果
+        chatBox.classList.add('fade-out');
+        
+        setTimeout(() => {
+            chatBox.innerHTML = ''; // 清空聊天視窗
+            conversationHistory = []; // 清空歷史紀錄
+            chatBox.classList.remove('fade-out');
+            displayMessage('assistant', '你好！我是一個全新的對話助理，請問有什麼可以幫你的嗎？');
+            toggleForm(false);
+        }, 150);
     });
 
 
@@ -285,24 +431,40 @@
     // -------------------------------------------------------------
 
     /**
-     * 向後端 API 發送請求並處理串流回覆
+     * 向後端 API 發送請求並處理 SSE 事件流
      * @param {string} userQuery - 使用者的查詢
      */
     async function getAIResponse(userQuery) {
-        // 建立一個空的 AI 訊息 div，稍後用來填入串流內容
-        const assistantMessageDiv = createMessageDiv('assistant');
+        // 創建對話容器（包含工具日誌和回覆內容）
+        const { 
+            conversationDiv, 
+            toolLogsContainer, 
+            toolLogsContent, 
+            responseContent 
+        } = createConversationContainer();
+
         let currentContent = '';
+        let hasUsedTools = false;
+
+        // 顯示載入指示器在回覆內容區
+        const loadingIndicator = createLoadingIndicator();
+        responseContent.appendChild(loadingIndicator);
+
+        // 構建請求體
+        const requestBody = JSON.stringify({
+            query: userQuery,
+            history: conversationHistory
+        });
 
         try {
+            // 使用 fetch 發送 POST 請求，然後手動處理 SSE
             const response = await fetch(API_URL, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'Accept': 'text/event-stream',
                 },
-                body: JSON.stringify({
-                    query: userQuery,
-                    history: conversationHistory // 傳送完整的對話歷史
-                })
+                body: requestBody
             });
 
             if (!response.ok) {
@@ -312,45 +474,48 @@
             const reader = response.body.getReader();
             const decoder = new TextDecoder('utf-8');
 
-            // 處理串流數據
-            try {
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
 
-                    const chunk = decoder.decode(value, { stream: true });
-                    
-                    // 跳過工具狀態訊息，只處理實際的回覆內容
-                    if (chunk.trim().startsWith('{') && chunk.includes('"type":')) {
+                const chunk = decoder.decode(value, { stream: true });
+                const lines = chunk.split('\n');
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
                         try {
-                            const statusData = JSON.parse(chunk.trim());
-                            if (statusData.type === 'tool_status' || statusData.type === 'tools_completed') {
-                                // 忽略所有工具相關的狀態訊息
-                                continue;
-                            }
+                            const eventData = JSON.parse(line.slice(6));
+                            await handleServerEvent(eventData, responseContent, {
+                                toolLogsContent,
+                                toolLogsContainer,
+                                updateContent: (content) => {
+                                    // 第一次收到內容時移除載入指示器
+                                    if (loadingIndicator && loadingIndicator.parentNode) {
+                                        loadingIndicator.remove();
+                                    }
+                                    currentContent += content;
+                                    responseContent.innerHTML = marked.parse(currentContent);
+                                },
+                                markToolsUsed: () => {
+                                    if (!hasUsedTools) {
+                                        hasUsedTools = true;
+                                        // 清除"未使用工具"的提示信息並更新工具日誌標題
+                                        toolLogsContent.innerHTML = '';
+                                        updateToolLogsForActiveUse(toolLogsContainer);
+                                    }
+                                }
+                            });
                         } catch (e) {
-                            // 如果不是有效的 JSON，當作普通內容處理
+                            console.warn('解析 SSE 事件失敗:', e);
                         }
                     }
-                    
-                    currentContent += chunk;
-                    
-                    // 即時渲染 Markdown 內容
-                    assistantMessageDiv.innerHTML = marked.parse(currentContent);
-                    scrollToBottom();
                 }
-            } catch (streamError) {
-                console.error('串流處理錯誤:', streamError);
-                const errorContent = currentContent + '\n\n[串流中斷，回應可能不完整]';
-                assistantMessageDiv.innerHTML = marked.parse(errorContent);
-                throw streamError; // 重新拋出錯誤以觸發外層 catch
             }
+
         } catch (error) {
             console.error('API 請求失敗:', error);
             
-            // 根據錯誤類型提供更具體的錯誤訊息
             let errorMessage = '抱歉，發生了錯誤。';
-            
             if (error.name === 'NetworkError' || error.message.includes('Failed to fetch')) {
                 errorMessage = '網路連線異常，請檢查網路狀態後再試。';
             } else if (error.message.includes('500')) {
@@ -359,17 +524,54 @@
                 errorMessage = '請求太過頻繁，請稍後再試。';
             } else if (error.message.includes('401') || error.message.includes('403')) {
                 errorMessage = 'API 認證失敗，請檢查配置。';
-            } else if (currentContent) {
-                errorMessage = currentContent + '\n\n[回應未完成，請重新詢問]';
             }
             
-            assistantMessageDiv.innerHTML = marked.parse(errorMessage);
+            responseContent.innerHTML = marked.parse(errorMessage);
         } finally {
-            // 串流結束後，將用戶查詢和 AI 回覆都存入歷史紀錄
+            // 移除可能仍在的載入指示器
+            if (loadingIndicator && loadingIndicator.parentNode) {
+                loadingIndicator.remove();
+            }
+            
+            // 更新對話歷史
             conversationHistory.push({ role: 'user', content: userQuery });
             if (currentContent) {
                 conversationHistory.push({ role: 'assistant', content: currentContent });
             }
+        }
+    }
+
+    /**
+     * 處理伺服器發送的事件
+     */
+    async function handleServerEvent(eventData, responseContent, helpers) {
+        switch (eventData.type) {
+            case 'agent_action':
+                // 標記已使用工具
+                helpers.markToolsUsed();
+                addToolLogEntry(helpers.toolLogsContent, 'action', `開始執行工具: ${eventData.tool_name}`, eventData);
+                expandToolLogs(helpers.toolLogsContainer);
+                break;
+
+            case 'tool_end':
+                addToolLogEntry(helpers.toolLogsContent, 'result', `工具執行完成: ${eventData.tool_name}`, eventData);
+                break;
+
+            case 'content':
+                helpers.updateContent(eventData.content);
+                scrollToBottom();
+                break;
+
+            case 'agent_finish':
+                // 最終回覆完成，不需要額外處理
+                break;
+
+            case 'error':
+                responseContent.innerHTML = marked.parse(`錯誤: ${eventData.message}`);
+                break;
+
+            default:
+                console.warn('未知的事件類型:', eventData.type);
         }
     }
 
@@ -403,6 +605,37 @@
     }
 
     /**
+     * 創建對話容器，包含工具日誌和AI回覆區域
+     * @returns {Object} 包含容器和各部分的引用
+     */
+    function createConversationContainer() {
+        // 創建主對話容器
+        const conversationDiv = document.createElement('div');
+        conversationDiv.classList.add('message', 'assistant-message');
+        
+        // 創建工具日誌容器
+        const { container: toolLogsContainer, content: toolLogsContent } = createToolLogsContainer(false);
+        
+        // 創建AI回覆內容區域
+        const responseContent = document.createElement('div');
+        responseContent.classList.add('response-content');
+        
+        // 按順序添加：工具日誌在上，AI回覆在下
+        conversationDiv.appendChild(toolLogsContainer);
+        conversationDiv.appendChild(responseContent);
+        
+        // 插入到聊天視窗
+        chatBox.appendChild(conversationDiv);
+        
+        return {
+            conversationDiv,
+            toolLogsContainer,
+            toolLogsContent,
+            responseContent
+        };
+    }
+
+    /**
      * 禁用或啟用輸入表單
      * @param {boolean} disabled - 是否禁用
      */
@@ -410,6 +643,161 @@
         userInput.disabled = disabled;
         sendButton.disabled = disabled;
         userInput.focus();
+    }
+
+    /**
+     * 創建工具日誌容器（不自動插入到 DOM）
+     */
+    function createToolLogsContainer(hasTools = false) {
+        const container = document.createElement('div');
+        container.classList.add('tool-logs-container');
+        
+        // 創建標題列
+        const header = document.createElement('div');
+        header.classList.add('tool-logs-header');
+        
+        const title = document.createElement('h4');
+        title.classList.add('tool-logs-title');
+        title.textContent = '🔧 工具執行日誌';
+        
+        const toggleIcon = document.createElement('span');
+        toggleIcon.classList.add('toggle-icon');
+        toggleIcon.textContent = '▼';
+        
+        header.appendChild(title);
+        header.appendChild(toggleIcon);
+        
+        // 創建內容區域
+        const content = document.createElement('div');
+        content.classList.add('tool-logs-content');
+        
+        // 如果沒有工具調用，顯示提示信息
+        if (!hasTools) {
+            const noToolsMsg = document.createElement('div');
+            noToolsMsg.classList.add('tool-log-entry');
+            noToolsMsg.style.fontStyle = 'italic';
+            noToolsMsg.style.color = '#6c757d';
+            noToolsMsg.textContent = '此次回覆未使用任何工具';
+            content.appendChild(noToolsMsg);
+        }
+        
+        container.appendChild(header);
+        container.appendChild(content);
+        
+        // 添加收折功能
+        header.addEventListener('click', () => toggleToolLogs(container));
+        
+        // 恢復用戶偏好的收折狀態
+        const isCollapsed = localStorage.getItem('toolLogsCollapsed') === 'true';
+        if (isCollapsed) {
+            content.classList.add('collapsed');
+            toggleIcon.classList.add('collapsed');
+        }
+        
+        return { container, content };
+    }
+
+    /**
+     * 切換工具日誌的展開/收折狀態
+     */
+    function toggleToolLogs(container) {
+        const content = container.querySelector('.tool-logs-content');
+        const icon = container.querySelector('.toggle-icon');
+        
+        content.classList.toggle('collapsed');
+        icon.classList.toggle('collapsed');
+        
+        // 保存用戶偏好到 localStorage
+        const isCollapsed = content.classList.contains('collapsed');
+        localStorage.setItem('toolLogsCollapsed', isCollapsed);
+    }
+
+    /**
+     * 確保工具日誌處於展開狀態
+     */
+    function expandToolLogs(container) {
+        const content = container.querySelector('.tool-logs-content');
+        const icon = container.querySelector('.toggle-icon');
+        
+        content.classList.remove('collapsed');
+        icon.classList.remove('collapsed');
+    }
+
+    /**
+     * 當開始使用工具時更新工具日誌容器
+     */
+    function updateToolLogsForActiveUse(container) {
+        // 這個函數可以在未來用於更新工具日誌容器的狀態
+        // 例如改變標題顏色或添加活動指示器
+        const header = container.querySelector('.tool-logs-header');
+        header.style.backgroundColor = '#d1ecf1'; // 淺藍色表示活動狀態
+    }
+
+    /**
+     * 添加工具日誌條目
+     */
+    function addToolLogEntry(content, type, message, eventData) {
+        const entry = document.createElement('div');
+        entry.classList.add('tool-log-entry', `tool-log-${type}`);
+        
+        const timestamp = new Date().toLocaleTimeString();
+        const timestampSpan = document.createElement('span');
+        timestampSpan.classList.add('timestamp');
+        timestampSpan.textContent = timestamp;
+        
+        const messageDiv = document.createElement('div');
+        
+        if (type === 'action') {
+            messageDiv.innerHTML = `
+                <span class="tool-name">${eventData.tool_name}</span> 
+                - ${message}
+                ${eventData.tool_input ? '<br><small>參數: ' + JSON.stringify(eventData.tool_input, null, 2) + '</small>' : ''}
+            `;
+        } else if (type === 'result') {
+            const truncatedOutput = eventData.tool_output && eventData.tool_output.length > 200 
+                ? eventData.tool_output.substring(0, 200) + '...'
+                : eventData.tool_output;
+            
+            messageDiv.innerHTML = `
+                <span class="tool-name">${eventData.tool_name}</span> 
+                - ${message}
+                ${truncatedOutput ? '<br><small>結果: ' + truncatedOutput + '</small>' : ''}
+            `;
+        } else {
+            messageDiv.textContent = message;
+        }
+        
+        entry.appendChild(timestampSpan);
+        entry.appendChild(messageDiv);
+        content.appendChild(entry);
+        
+        // 滾動到日誌底部
+        content.scrollTop = content.scrollHeight;
+        scrollToBottom();
+    }
+
+    /**
+     * 創建載入指示器
+     */
+    function createLoadingIndicator() {
+        const indicator = document.createElement('div');
+        indicator.classList.add('loading-indicator');
+        
+        const text = document.createElement('span');
+        text.textContent = 'AI 正在思考';
+        
+        const dots = document.createElement('div');
+        dots.classList.add('loading-dots');
+        
+        for (let i = 0; i < 3; i++) {
+            const dot = document.createElement('span');
+            dots.appendChild(dot);
+        }
+        
+        indicator.appendChild(text);
+        indicator.appendChild(dots);
+        
+        return indicator;
     }
 
     /**
