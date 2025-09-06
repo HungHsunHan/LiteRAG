@@ -17,13 +17,13 @@ from tools import available_tools, tools_specs
 
 
 class StreamingCallbackHandler:
-    """自定義回調處理器，用於捕捉工具執行事件"""
+    """Custom callback handler for capturing tool execution events"""
     
     def __init__(self, event_queue: asyncio.Queue):
         self.event_queue = event_queue
     
     async def on_agent_action(self, tool_name: str, tool_input: Dict[str, Any]):
-        """當 Agent 決定使用工具時觸發"""
+        """Triggered when Agent decides to use a tool"""
         await self.event_queue.put({
             "type": "agent_action",
             "tool_name": tool_name,
@@ -32,7 +32,7 @@ class StreamingCallbackHandler:
         })
     
     async def on_tool_end(self, tool_name: str, tool_output: str):
-        """當工具執行完成時觸發"""
+        """Triggered when tool execution is completed"""
         await self.event_queue.put({
             "type": "tool_end", 
             "tool_name": tool_name,
@@ -41,7 +41,7 @@ class StreamingCallbackHandler:
         })
     
     async def on_agent_finish(self, final_answer: str):
-        """當 Agent 完成最終回覆時觸發"""
+        """Triggered when Agent completes final response"""
         await self.event_queue.put({
             "type": "agent_finish",
             "final_answer": final_answer,
@@ -51,54 +51,54 @@ class StreamingCallbackHandler:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """應用程式生命週期管理"""
-    # 啟動時執行
+    """Application lifecycle management"""
+    # Execute on startup
     setup_rag()
     yield
-    # 關閉時執行 (如果需要的話)
+    # Execute on shutdown (if needed)
 
 
 app = FastAPI(lifespan=lifespan)
-# 設定允許的來源
+# Configure allowed origins
 origins = [
     "http://localhost",
     "http://127.0.0.1",
-    "null",  # 允許從本地 file:// 協議發出的請求
+    "null",  # Allow requests from local file:// protocol
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],  # 允許所有方法
-    allow_headers=["*"],  # 允許所有標頭
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
 )
 
-# 載入環境變數 (OPENAI_API_KEY)
+# Load environment variables (OPENAI_API_KEY)
 load_dotenv(override=True)
 
-# 配置參數
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")  # 預設使用 gpt-4o
+# Configuration parameters
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")  # Default to gpt-4o
 
-# 初始化 OpenAI client
+# Initialize OpenAI client
 client = AsyncOpenAI()
 
 
-# 定義請求的資料結構
+# Define request data structure
 class ChatRequest(BaseModel):
     query: str
-    history: list = []  # 支援多輪對話
+    history: list = []  # Support multi-turn conversation
 
 
 async def stream_generator(messages: list):
     """
-    處理與 OpenAI 的互動並生成 SSE 事件流的核心函數。
+    Core function to handle OpenAI interaction and generate SSE event stream.
     """
-    # 創建事件佇列和回調處理器
+    # Create event queue and callback handler
     event_queue = asyncio.Queue()
     callback_handler = StreamingCallbackHandler(event_queue)
     
-    # === 步驟 1: 第一次呼叫 OpenAI，判斷是否需要使用工具 ===
+    # === Step 1: First OpenAI call to determine if tools are needed ===
     try:
         first_response_stream = await client.chat.completions.create(
             model=OPENAI_MODEL,
@@ -111,9 +111,9 @@ async def stream_generator(messages: list):
         tool_calls = {}
         has_content = False
         
-        # 處理第一次回覆的流
+        # Process first response stream
         async for chunk in first_response_stream:
-            # 處理工具呼叫
+            # Handle tool calls
             if chunk.choices[0].delta.tool_calls:
                 for tool_call_delta in chunk.choices[0].delta.tool_calls:
                     if tool_call_delta.id:
@@ -134,24 +134,24 @@ async def stream_generator(messages: list):
                             last_tool_id = list(tool_calls.keys())[-1]
                             tool_calls[last_tool_id]["function"]["arguments"] += tool_call_delta.function.arguments
 
-            # 處理內容回覆
+            # Handle content response
             if content := chunk.choices[0].delta.content:
                 has_content = True
                 yield f"data: {json.dumps({'type': 'content', 'content': content}, ensure_ascii=False)}\n\n"
 
-        # 如果沒有工具呼叫，直接結束
+        # If no tool calls, end directly
         if not tool_calls:
             if not has_content:
-                yield f"data: {json.dumps({'type': 'content', 'content': '我理解了你的問題，但目前沒有需要額外資訊來回答。'}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'content', 'content': 'I understand your question, but no additional information is needed to answer it.'}, ensure_ascii=False)}\n\n"
             yield f"data: {json.dumps({'type': 'agent_finish', 'final_answer': ''}, ensure_ascii=False)}\n\n"
             return
 
     except Exception as e:
         print(f"Error during first OpenAI call: {e}")
-        yield f"data: {json.dumps({'type': 'error', 'message': f'與 OpenAI 互動時發生錯誤: {e}'}, ensure_ascii=False)}\n\n"
+        yield f"data: {json.dumps({'type': 'error', 'message': f'Error interacting with OpenAI: {e}'}, ensure_ascii=False)}\n\n"
         return
 
-    # === 步驟 2: 執行工具並廣播事件 ===
+    # === Step 2: Execute tools and broadcast events ===
     assistant_message = {"role": "assistant", "content": None, "tool_calls": list(tool_calls.values())}
     messages.append(assistant_message)
 
@@ -163,7 +163,7 @@ async def stream_generator(messages: list):
         try:
             tool_args = json.loads(tool_call["function"]["arguments"])
             
-            # 廣播工具開始事件
+            # Broadcast tool start event
             await callback_handler.on_agent_action(tool_name, tool_args)
             event = await event_queue.get()
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
@@ -172,7 +172,7 @@ async def stream_generator(messages: list):
                 function_to_call = available_tools[tool_name]
                 tool_output = function_to_call(**tool_args)
 
-                # 廣播工具完成事件
+                # Broadcast tool completion event
                 await callback_handler.on_tool_end(tool_name, tool_output)
                 event = await event_queue.get()
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
@@ -185,23 +185,23 @@ async def stream_generator(messages: list):
                 })
 
             else:
-                error_msg = f"找不到工具: {tool_name}"
+                error_msg = f"Tool not found: {tool_name}"
                 yield f"data: {json.dumps({'type': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
                 return
 
         except json.JSONDecodeError as e:
-            error_msg = f"工具 '{tool_name}' 的參數格式錯誤: {e}"
+            error_msg = f"Invalid parameter format for tool '{tool_name}': {e}"
             yield f"data: {json.dumps({'type': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
             return
         except Exception as e:
-            error_msg = f"執行工具 '{tool_name}' 時發生錯誤: {e}"
+            error_msg = f"Error executing tool '{tool_name}': {e}"
             yield f"data: {json.dumps({'type': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
             return
 
-    # 將工具結果加入對話
+    # Add tool results to conversation
     messages.extend(tool_results)
 
-    # === 步驟 3: 第二次呼叫 OpenAI，生成最終答案 ===
+    # === Step 3: Second OpenAI call to generate final answer ===
     try:
         second_response_stream = await client.chat.completions.create(
             model=OPENAI_MODEL,
@@ -215,21 +215,21 @@ async def stream_generator(messages: list):
                 final_content += content
                 yield f"data: {json.dumps({'type': 'content', 'content': content}, ensure_ascii=False)}\n\n"
 
-        # 廣播最終完成事件
+        # Broadcast final completion event
         await callback_handler.on_agent_finish(final_content)
         event = await event_queue.get()
         yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
     except Exception as e:
         print(f"Error during second OpenAI call: {e}")
-        error_msg = f"在整合工具結果時發生錯誤: {e}"
+        error_msg = f"Error integrating tool results: {e}"
         yield f"data: {json.dumps({'type': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
 
 
 @app.post("/chat/stream")
 async def chat_stream(chat_request: ChatRequest):
     """
-    API 端點，接收請求並返回 SSE 串流。
+    API endpoint to receive requests and return SSE stream.
     """
     messages = chat_request.history + [{"role": "user", "content": chat_request.query}]
     
@@ -239,6 +239,6 @@ async def chat_stream(chat_request: ChatRequest):
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"  # 對 nginx 禁用緩衝
+            "X-Accel-Buffering": "no"  # Disable buffering for nginx
         }
     )

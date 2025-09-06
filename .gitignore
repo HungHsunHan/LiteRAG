@@ -1,3 +1,5 @@
 .env
 **pycache**
 .claude
+article.md
+article_en.md

@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>最輕量 AI 助理</title>
-    <!-- 引入 marked.js 來處理 Markdown 渲染 -->
+    <title>Lightweight AI Assistant</title>
+    <!-- Include marked.js to handle Markdown rendering -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         :root {
@@ -117,7 +117,7 @@
             cursor: not-allowed;
         }
 
-        /* Markdown 渲染後的樣式 */
+        /* Styles for rendered Markdown */
         .assistant-message h1,
         .assistant-message h2,
         .assistant-message h3,
@@ -208,7 +208,7 @@
             text-decoration: underline;
         }
 
-        /* 可收折的工具日誌區塊 */
+        /* Collapsible tool log section */
         .tool-logs-container {
             background-color: #f8f9fa;
             border: 1px solid #dee2e6;
@@ -301,7 +301,7 @@
             float: right;
         }
 
-        /* 載入動畫 */
+        /* Loading animation */
         .loading-indicator {
             display: inline-flex;
             align-items: center;
@@ -344,18 +344,18 @@
             }
         }
 
-        /* 新對話清理樣式 */
+        /* New conversation cleanup styles */
         .fade-out {
             opacity: 0;
             transition: opacity 0.3s ease-out;
         }
 
-        /* 回覆內容區域樣式 */
+        /* Response content area styles */
         .response-content {
             margin-top: 0.5rem;
         }
 
-        /* 確保工具日誌和回覆內容之間有適當間距 */
+        /* Ensure proper spacing between tool logs and response content */
         .tool-logs-container + .response-content {
             margin-top: 0.75rem;
         }
@@ -371,14 +371,14 @@
     <div id="chat-box">
         </div>
     <form id="chat-form">
-        <input type="text" id="user-input" placeholder="在這裡輸入訊息..." autocomplete="off">
+        <input type="text" id="user-input" placeholder="Type your message here..." autocomplete="off">
         <button type="submit">Send</button>
     </form>
 </div>
 
 <script>
     // -------------------------------------------------------------
-    // 1. 元素選取與狀態管理
+    // 1. Element selection and state management
     // -------------------------------------------------------------
     const chatBox = document.getElementById('chat-box');
     const chatForm = document.getElementById('chat-form');
@@ -386,62 +386,62 @@
     const newChatButton = document.getElementById('new-chat-button');
     const sendButton = chatForm.querySelector('button');
 
-    // 關鍵！用這個陣列來保存對話歷史，實現「記憶」功能
+    // Key! Use this array to save conversation history, implementing "memory" functionality
     let conversationHistory = [];
     const API_URL = 'http://127.0.0.1:8000/chat/stream';
 
-    // 工具名稱映射，將技術名稱轉換為用戶友好的中文名稱
+    // Tool name mapping, convert technical names to user-friendly English names
     const TOOL_NAME_MAP = {
-        'local_rag_search': '資料庫查詢',
-        'web_search': '網頁搜尋'
+        'local_rag_search': 'Database Query',
+        'web_search': 'Web Search'
     };
 
     // -------------------------------------------------------------
-    // 2. 事件監聽
+    // 2. Event listeners
     // -------------------------------------------------------------
 
-    // 監聽表單提交事件
+    // Listen to form submit events
     chatForm.addEventListener('submit', async (e) => {
-        e.preventDefault(); // 防止頁面刷新
+        e.preventDefault(); // Prevent page refresh
         const userQuery = userInput.value.trim();
         if (!userQuery) return;
 
-        // 顯示使用者訊息
+        // Display user message
         displayMessage('user', userQuery);
         
-        userInput.value = ''; // 清空輸入框
-        toggleForm(true); // 禁用表單
+        userInput.value = ''; // Clear input box
+        toggleForm(true); // Disable form
 
-        await getAIResponse(userQuery); // 呼叫後端取得 AI 回覆
+        await getAIResponse(userQuery); // Call backend to get AI response
         
-        toggleForm(false); // 啟用表單
+        toggleForm(false); // Enable form
     });
 
-    // 監聽新對話按鈕點擊事件
+    // Listen to new conversation button click events
     newChatButton.addEventListener('click', () => {
-        // 添加淡出效果
+        // Add fade out effect
         chatBox.classList.add('fade-out');
         
         setTimeout(() => {
-            chatBox.innerHTML = ''; // 清空聊天視窗
-            conversationHistory = []; // 清空歷史紀錄
+            chatBox.innerHTML = ''; // Clear chat window
+            conversationHistory = []; // Clear history record
             chatBox.classList.remove('fade-out');
-            displayMessage('assistant', '你好！我是一個全新的對話助理，請問有什麼可以幫你的嗎？');
+            displayMessage('assistant', 'Hello! I am a brand new conversation assistant. How can I help you?');
             toggleForm(false);
         }, 150);
     });
 
 
     // -------------------------------------------------------------
-    // 3. 核心功能函式
+    // 3. Core functionality functions
     // -------------------------------------------------------------
 
     /**
-     * 向後端 API 發送請求並處理 SSE 事件流
-     * @param {string} userQuery - 使用者的查詢
+     * Send request to backend API and handle SSE event stream
+     * @param {string} userQuery - User's query
      */
     async function getAIResponse(userQuery) {
-        // 創建對話容器（包含工具日誌和回覆內容）
+        // Create conversation container (including tool logs and response content)
         const { 
             conversationDiv, 
             toolLogsContainer, 
@@ -452,18 +452,18 @@
         let currentContent = '';
         let hasUsedTools = false;
 
-        // 顯示載入指示器在回覆內容區
+        // Display loading indicator in response content area
         const loadingIndicator = createLoadingIndicator();
         responseContent.appendChild(loadingIndicator);
 
-        // 構建請求體
+        // Build request body
         const requestBody = JSON.stringify({
             query: userQuery,
             history: conversationHistory
         });
 
         try {
-            // 使用 fetch 發送 POST 請求，然後手動處理 SSE
+            // Use fetch to send POST request, then manually handle SSE
             const response = await fetch(API_URL, {
                 method: 'POST',
                 headers: {
@@ -474,7 +474,7 @@
             });
 
             if (!response.ok) {
-                throw new Error(`伺服器錯誤: ${response.status} ${response.statusText}`);
+                throw new Error(`Server error: ${response.status} ${response.statusText}`);
             }
 
             const reader = response.body.getReader();
@@ -495,7 +495,7 @@
                                 toolLogsContent,
                                 toolLogsContainer,
                                 updateContent: (content) => {
-                                    // 第一次收到內容時移除載入指示器
+                                    // Remove loading indicator when first content is received
                                     if (loadingIndicator && loadingIndicator.parentNode) {
                                         loadingIndicator.remove();
                                     }
@@ -505,41 +505,41 @@
                                 markToolsUsed: () => {
                                     if (!hasUsedTools) {
                                         hasUsedTools = true;
-                                        // 清除"未使用工具"的提示信息並更新工具日誌標題
+                                        // Clear "no tools used" message and update tool log title
                                         toolLogsContent.innerHTML = '';
                                         updateToolLogsForActiveUse(toolLogsContainer);
                                     }
                                 }
                             });
                         } catch (e) {
-                            console.warn('解析 SSE 事件失敗:', e);
+                            console.warn('Failed to parse SSE event:', e);
                         }
                     }
                 }
             }
 
         } catch (error) {
-            console.error('API 請求失敗:', error);
+            console.error('API request failed:', error);
             
-            let errorMessage = '抱歉，發生了錯誤。';
+            let errorMessage = 'Sorry, an error occurred.';
             if (error.name === 'NetworkError' || error.message.includes('Failed to fetch')) {
-                errorMessage = '網路連線異常，請檢查網路狀態後再試。';
+                errorMessage = 'Network connection error, please check network status and try again.';
             } else if (error.message.includes('500')) {
-                errorMessage = '伺服器內部錯誤，請稍後再試。';
+                errorMessage = 'Internal server error, please try again later.';
             } else if (error.message.includes('429')) {
-                errorMessage = '請求太過頻繁，請稍後再試。';
+                errorMessage = 'Too many requests, please try again later.';
             } else if (error.message.includes('401') || error.message.includes('403')) {
-                errorMessage = 'API 認證失敗，請檢查配置。';
+                errorMessage = 'API authentication failed, please check configuration.';
             }
             
             responseContent.innerHTML = marked.parse(errorMessage);
         } finally {
-            // 移除可能仍在的載入指示器
+            // Remove any remaining loading indicator
             if (loadingIndicator && loadingIndicator.parentNode) {
                 loadingIndicator.remove();
             }
             
-            // 更新對話歷史
+            // Update conversation history
             conversationHistory.push({ role: 'user', content: userQuery });
             if (currentContent) {
                 conversationHistory.push({ role: 'assistant', content: currentContent });
@@ -548,21 +548,21 @@
     }
 
     /**
-     * 處理伺服器發送的事件
+     * Handle events sent by server
      */
     async function handleServerEvent(eventData, responseContent, helpers) {
         switch (eventData.type) {
             case 'agent_action':
-                // 標記已使用工具
+                // Mark tools as used
                 helpers.markToolsUsed();
-                // 使用中文名稱顯示工具執行信息
+                // Use English names to display tool execution info
                 const toolDisplayName = TOOL_NAME_MAP[eventData.tool_name] || eventData.tool_name;
-                addToolLogEntry(helpers.toolLogsContent, 'action', `開始執行工具: ${toolDisplayName}`, eventData);
+                addToolLogEntry(helpers.toolLogsContent, 'action', `Starting tool execution: ${toolDisplayName}`, eventData);
                 expandToolLogs(helpers.toolLogsContainer);
                 break;
 
             case 'tool_end':
-                // 不再顯示工具執行完成的信息
+                // No longer display tool execution completion info
                 break;
 
             case 'content':
@@ -571,15 +571,15 @@
                 break;
 
             case 'agent_finish':
-                // 最終回覆完成，不需要額外處理
+                // Final response completed, no additional processing needed
                 break;
 
             case 'error':
-                responseContent.innerHTML = marked.parse(`錯誤: ${eventData.message}`);
+                responseContent.innerHTML = marked.parse(`Error: ${eventData.message}`);
                 break;
 
             default:
-                console.warn('未知的事件類型:', eventData.type);
+                console.warn('Unknown event type:', eventData.type);
         }
     }
 
@@ -624,7 +624,7 @@
         // 創建工具日誌容器
         const { container: toolLogsContainer, content: toolLogsContent } = createToolLogsContainer(false);
         
-        // 創建AI回覆內容區域
+        // Create AI response content area
         const responseContent = document.createElement('div');
         responseContent.classList.add('response-content');
         
@@ -801,7 +801,7 @@
     // -------------------------------------------------------------
     // 4. 初始載入
     // -------------------------------------------------------------
-    displayMessage('assistant', 'Hello！How can I help you？');
+    displayMessage('assistant', 'Hello! How can I help you?');
 
 </script>
 </body>
