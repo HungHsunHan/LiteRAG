@@ -11,6 +11,18 @@ An AI assistant that combines RAG (Retrieval-Augmented Generation) with web sear
 - 📱 **Lightweight Frontend**: Pure HTML/CSS/JS implementation, no additional frameworks needed
 - 🔄 **Streaming Response**: Real-time AI response display
 
+## 🖥️ User Interface
+
+![Chatbot UI](images/UI.png)
+
+The application features a clean, intuitive chat interface with:
+
+- **Chat Area**: Displays conversation history with distinct styling for user questions (green) and AI responses (white)
+- **Tool Execution Panel**: Shows detailed execution steps when AI tools are used (RAG search, web search)
+- **Input Field**: Simple text input for user queries with send button
+- **New Session**: Button to start fresh conversations
+- **Responsive Design**: Works seamlessly across different screen sizes
+
 ## 🛠️ Technical Architecture
 
 ### Backend
