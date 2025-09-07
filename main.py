@@ -3,7 +3,7 @@ import asyncio
 import json
 import os
 from contextlib import asynccontextmanager
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -18,35 +18,41 @@ from tools import available_tools, tools_specs
 
 class StreamingCallbackHandler:
     """自定義回調處理器，用於捕捉工具執行事件"""
-    
+
     def __init__(self, event_queue: asyncio.Queue):
         self.event_queue = event_queue
-    
+
     async def on_agent_action(self, tool_name: str, tool_input: Dict[str, Any]):
         """當 Agent 決定使用工具時觸發"""
-        await self.event_queue.put({
-            "type": "agent_action",
-            "tool_name": tool_name,
-            "tool_input": tool_input,
-            "timestamp": asyncio.get_event_loop().time()
-        })
-    
+        await self.event_queue.put(
+            {
+                "type": "agent_action",
+                "tool_name": tool_name,
+                "tool_input": tool_input,
+                "timestamp": asyncio.get_event_loop().time(),
+            }
+        )
+
     async def on_tool_end(self, tool_name: str, tool_output: str):
         """當工具執行完成時觸發"""
-        await self.event_queue.put({
-            "type": "tool_end", 
-            "tool_name": tool_name,
-            "tool_output": tool_output,
-            "timestamp": asyncio.get_event_loop().time()
-        })
-    
+        await self.event_queue.put(
+            {
+                "type": "tool_end",
+                "tool_name": tool_name,
+                "tool_output": tool_output,
+                "timestamp": asyncio.get_event_loop().time(),
+            }
+        )
+
     async def on_agent_finish(self, final_answer: str):
         """當 Agent 完成最終回覆時觸發"""
-        await self.event_queue.put({
-            "type": "agent_finish",
-            "final_answer": final_answer,
-            "timestamp": asyncio.get_event_loop().time()
-        })
+        await self.event_queue.put(
+            {
+                "type": "agent_finish",
+                "final_answer": final_answer,
+                "timestamp": asyncio.get_event_loop().time(),
+            }
+        )
 
 
 @asynccontextmanager
@@ -65,7 +71,7 @@ origins = [
     "http://127.0.0.1",
     "http://192.168.0.46",  # 本機局域網IP
     "null",  # 允許從本地 file:// 協議發出的請求
-    "*"  # 允許所有來源（僅用於開發測試）
+    "*",  # 允許所有來源（僅用於開發測試）
 ]
 
 app.add_middleware(
@@ -91,6 +97,7 @@ class ChatRequest(BaseModel):
     query: str
     history: list = []  # 支援多輪對話
     session_id: str = None  # 會話ID，用於區分不同用戶
+
 
 # 定義非串流回應格式
 class ChatResponse(BaseModel):
@@ -131,17 +138,17 @@ async def stream_generator(messages: list):
 - 禁止基於常識或訓練數據直接回答（必須先搜索）
 - 禁止省略資訊來源的標註
 
-記住：你是RAG系統，資訊的可靠性和來源透明度是你的核心價值。"""
+記住：你是RAG系統，資訊的可靠性和來源透明度是你的核心價值。""",
     }
-    
+
     # 將系統提示插入到訊息列表開頭
     if not messages or messages[0].get("role") != "system":
         messages.insert(0, system_prompt)
-    
+
     # 創建事件佇列和回調處理器
     event_queue = asyncio.Queue()
     callback_handler = StreamingCallbackHandler(event_queue)
-    
+
     # === 步驟 1: 第一次呼叫 OpenAI，判斷是否需要使用工具 ===
     try:
         first_response_stream = await client.chat.completions.create(
@@ -154,7 +161,7 @@ async def stream_generator(messages: list):
 
         tool_calls = {}
         has_content = False
-        
+
         # 處理第一次回覆的流
         async for chunk in first_response_stream:
             # 處理工具呼叫
@@ -170,13 +177,23 @@ async def stream_generator(messages: list):
 
                         if tool_call_delta.function:
                             if tool_call_delta.function.name:
-                                tool_calls[tool_call_delta.id]["function"]["name"] += tool_call_delta.function.name
+                                tool_calls[tool_call_delta.id]["function"][
+                                    "name"
+                                ] += tool_call_delta.function.name
                             if tool_call_delta.function.arguments:
-                                tool_calls[tool_call_delta.id]["function"]["arguments"] += tool_call_delta.function.arguments
+                                tool_calls[tool_call_delta.id]["function"][
+                                    "arguments"
+                                ] += tool_call_delta.function.arguments
                     else:
-                        if tool_calls and tool_call_delta.function and tool_call_delta.function.arguments:
+                        if (
+                            tool_calls
+                            and tool_call_delta.function
+                            and tool_call_delta.function.arguments
+                        ):
                             last_tool_id = list(tool_calls.keys())[-1]
-                            tool_calls[last_tool_id]["function"]["arguments"] += tool_call_delta.function.arguments
+                            tool_calls[last_tool_id]["function"][
+                                "arguments"
+                            ] += tool_call_delta.function.arguments
 
             # 處理內容回覆
             if content := chunk.choices[0].delta.content:
@@ -196,17 +213,21 @@ async def stream_generator(messages: list):
         return
 
     # === 步驟 2: 執行工具並廣播事件 ===
-    assistant_message = {"role": "assistant", "content": None, "tool_calls": list(tool_calls.values())}
+    assistant_message = {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": list(tool_calls.values()),
+    }
     messages.append(assistant_message)
 
     tool_results = []
 
     for tool_call in assistant_message["tool_calls"]:
         tool_name = tool_call["function"]["name"]
-        
+
         try:
             tool_args = json.loads(tool_call["function"]["arguments"])
-            
+
             # 廣播工具開始事件
             await callback_handler.on_agent_action(tool_name, tool_args)
             event = await event_queue.get()
@@ -221,12 +242,14 @@ async def stream_generator(messages: list):
                 event = await event_queue.get()
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
-                tool_results.append({
-                    "tool_call_id": tool_call["id"],
-                    "role": "tool",
-                    "name": tool_name,
-                    "content": tool_output,
-                })
+                tool_results.append(
+                    {
+                        "tool_call_id": tool_call["id"],
+                        "role": "tool",
+                        "name": tool_name,
+                        "content": tool_output,
+                    }
+                )
 
             else:
                 error_msg = f"找不到工具: {tool_name}"
@@ -240,12 +263,14 @@ async def stream_generator(messages: list):
         except Exception as e:
             # 工具執行異常時，記錄錯誤但繼續處理其他工具
             print(f"工具 '{tool_name}' 執行時發生錯誤: {e}")
-            tool_results.append({
-                "tool_call_id": tool_call["id"],
-                "role": "tool",
-                "name": tool_name,
-                "content": f"執行工具時發生錯誤: {str(e)}",
-            })
+            tool_results.append(
+                {
+                    "tool_call_id": tool_call["id"],
+                    "role": "tool",
+                    "name": tool_name,
+                    "content": f"執行工具時發生錯誤: {str(e)}",
+                }
+            )
             # 不要 return，繼續處理其他工具
 
     # 將工具結果加入對話
@@ -306,16 +331,16 @@ async def process_chat_request(messages: list) -> Dict[str, Any]:
 - 禁止基於常識或訓練數據直接回答（必須先搜索）
 - 禁止省略資訊來源的標註
 
-記住：你是RAG系統，資訊的可靠性和來源透明度是你的核心價值。"""
+記住：你是RAG系統，資訊的可靠性和來源透明度是你的核心價值。""",
     }
-    
+
     if not messages or messages[0].get("role") != "system":
         messages.insert(0, system_prompt)
-    
+
     tools_used = []
     final_answer = ""
     error_message = None
-    
+
     try:
         # 第一次呼叫 OpenAI，判斷是否需要使用工具
         first_response = await client.chat.completions.create(
@@ -329,85 +354,79 @@ async def process_chat_request(messages: list) -> Dict[str, Any]:
         if first_response.choices[0].message.tool_calls:
             # 處理工具呼叫
             assistant_message = {
-                "role": "assistant", 
+                "role": "assistant",
                 "content": first_response.choices[0].message.content,
-                "tool_calls": first_response.choices[0].message.tool_calls
+                "tool_calls": first_response.choices[0].message.tool_calls,
             }
             messages.append(assistant_message)
-            
+
             tool_results = []
-            
+
             for tool_call in assistant_message["tool_calls"]:
                 tool_name = tool_call.function.name
-                
+
                 try:
                     tool_args = json.loads(tool_call.function.arguments)
-                    tools_used.append({
-                        "name": tool_name,
-                        "arguments": tool_args
-                    })
-                    
+                    tools_used.append({"name": tool_name, "arguments": tool_args})
+
                     if tool_name in available_tools:
                         function_to_call = available_tools[tool_name]
                         tool_output = function_to_call(**tool_args)
-                        
-                        tool_results.append({
-                            "tool_call_id": tool_call.id,
-                            "role": "tool",
-                            "name": tool_name,
-                            "content": tool_output,
-                        })
+
+                        tool_results.append(
+                            {
+                                "tool_call_id": tool_call.id,
+                                "role": "tool",
+                                "name": tool_name,
+                                "content": tool_output,
+                            }
+                        )
                     else:
                         error_message = f"找不到工具: {tool_name}"
                         return {
                             "answer": "",
                             "tools_used": tools_used,
-                            "error": error_message
+                            "error": error_message,
                         }
-                        
+
                 except json.JSONDecodeError as e:
                     error_message = f"工具 '{tool_name}' 的參數格式錯誤: {e}"
                     return {
                         "answer": "",
                         "tools_used": tools_used,
-                        "error": error_message
+                        "error": error_message,
                     }
                 except Exception as e:
                     error_message = f"執行工具 '{tool_name}' 時發生錯誤: {e}"
                     return {
                         "answer": "",
                         "tools_used": tools_used,
-                        "error": error_message
+                        "error": error_message,
                     }
-            
+
             # 將工具結果加入對話
             messages.extend(tool_results)
-            
+
             # 第二次呼叫 OpenAI，生成最終答案
             second_response = await client.chat.completions.create(
                 model=OPENAI_MODEL,
                 messages=messages,
             )
-            
+
             final_answer = second_response.choices[0].message.content
-            
+
         else:
             # 沒有工具呼叫，直接使用第一次的回應
-            final_answer = first_response.choices[0].message.content or "我理解了你的問題，但目前沒有需要額外資訊來回答。"
-    
+            final_answer = (
+                first_response.choices[0].message.content
+                or "我理解了你的問題，但目前沒有需要額外資訊來回答。"
+            )
+
     except Exception as e:
         error_message = f"處理請求時發生錯誤: {e}"
-        return {
-            "answer": "",
-            "tools_used": tools_used,
-            "error": error_message
-        }
-    
-    return {
-        "answer": final_answer,
-        "tools_used": tools_used,
-        "error": error_message
-    }
+        return {"answer": "", "tools_used": tools_used, "error": error_message}
+
+    return {"answer": final_answer, "tools_used": tools_used, "error": error_message}
 
 
 @app.post("/chat/stream")
@@ -417,18 +436,20 @@ async def chat_stream(chat_request: ChatRequest):
     """
     # 記錄會話ID以便調試（可選）
     if chat_request.session_id:
-        print(f"處理會話 {chat_request.session_id} 的請求: {chat_request.query[:50]}...")
-    
+        print(
+            f"處理會話 {chat_request.session_id} 的請求: {chat_request.query[:50]}..."
+        )
+
     messages = chat_request.history + [{"role": "user", "content": chat_request.query}]
-    
+
     return StreamingResponse(
-        stream_generator(messages), 
+        stream_generator(messages),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"  # 對 nginx 禁用緩衝
-        }
+            "X-Accel-Buffering": "no",  # 對 nginx 禁用緩衝
+        },
     )
 
 
@@ -438,15 +459,17 @@ async def chat(chat_request: ChatRequest):
     API 端點，接收請求並返回完整的JSON回應（非串流）。
     """
     if chat_request.session_id:
-        print(f"處理會話 {chat_request.session_id} 的非串流請求: {chat_request.query[:50]}...")
-    
+        print(
+            f"處理會話 {chat_request.session_id} 的非串流請求: {chat_request.query[:50]}..."
+        )
+
     messages = chat_request.history + [{"role": "user", "content": chat_request.query}]
-    
+
     result = await process_chat_request(messages)
-    
+
     return ChatResponse(
         answer=result["answer"],
         tools_used=result["tools_used"],
         error=result["error"],
-        session_id=chat_request.session_id
+        session_id=chat_request.session_id,
     )
