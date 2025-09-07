@@ -116,8 +116,9 @@ async def stream_generator(messages: list):
 
 【工具使用策略】
 - 對於本地知識庫相關問題，優先使用 local_rag_search
-- 對於最新資訊、即時數據、外部資訊，使用 web_search  
-- 可以同時使用多個工具來獲得更全面的資訊
+- 如果 local_rag_search 返回的結果與問題不相關或無法回答問題，必須使用 web_search 搜索網路資訊
+- 對於最新資訊、即時數據、外部資訊，直接使用 web_search
+- 可以同時或依序使用多個工具來獲得更全面和準確的資訊
 
 【回答格式要求】
 1. 清楚標註每個資訊的來源（知識庫 vs 網路搜尋）
@@ -237,9 +238,15 @@ async def stream_generator(messages: list):
             yield f"data: {json.dumps({'type': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
             return
         except Exception as e:
-            error_msg = f"執行工具 '{tool_name}' 時發生錯誤: {e}"
-            yield f"data: {json.dumps({'type': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
-            return
+            # 工具執行異常時，記錄錯誤但繼續處理其他工具
+            print(f"工具 '{tool_name}' 執行時發生錯誤: {e}")
+            tool_results.append({
+                "tool_call_id": tool_call["id"],
+                "role": "tool",
+                "name": tool_name,
+                "content": f"執行工具時發生錯誤: {str(e)}",
+            })
+            # 不要 return，繼續處理其他工具
 
     # 將工具結果加入對話
     messages.extend(tool_results)
@@ -284,8 +291,9 @@ async def process_chat_request(messages: list) -> Dict[str, Any]:
 
 【工具使用策略】
 - 對於本地知識庫相關問題，優先使用 local_rag_search
-- 對於最新資訊、即時數據、外部資訊，使用 web_search  
-- 可以同時使用多個工具來獲得更全面的資訊
+- 如果 local_rag_search 返回的結果與問題不相關或無法回答問題，必須使用 web_search 搜索網路資訊
+- 對於最新資訊、即時數據、外部資訊，直接使用 web_search
+- 可以同時或依序使用多個工具來獲得更全面和準確的資訊
 
 【回答格式要求】
 1. 清楚標註每個資訊的來源（知識庫 vs 網路搜尋）
