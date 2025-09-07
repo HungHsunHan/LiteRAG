@@ -12,6 +12,8 @@ load_dotenv(override=True)
 
 vector_store = None
 TIMESTAMP_FILE = "rag_timestamp.json"
+FAISS_INDEX_DIR = "faiss_index"
+FAISS_INDEX_NAME = "knowledge_base"
 
 
 def get_file_mtime(file_path):
@@ -38,6 +40,51 @@ def save_timestamp():
         json.dump({"last_embedding_time": datetime.now().timestamp()}, f)
 
 
+def save_local():
+    """將 FAISS 向量儲存保存到本地"""
+    global vector_store
+    if not vector_store:
+        print("❌ 無法保存：向量儲存尚未初始化")
+        return False
+    
+    try:
+        os.makedirs(FAISS_INDEX_DIR, exist_ok=True)
+        vector_store.save_local(FAISS_INDEX_DIR, FAISS_INDEX_NAME)
+        save_timestamp()
+        print(f"💾 FAISS 向量儲存已保存至 {FAISS_INDEX_DIR}/{FAISS_INDEX_NAME}")
+        return True
+    except Exception as e:
+        print(f"❌ 保存 FAISS 向量儲存時發生錯誤: {e}")
+        return False
+
+
+def load_local():
+    """從本地載入 FAISS 向量儲存"""
+    global vector_store
+    
+    faiss_path = os.path.join(FAISS_INDEX_DIR, f"{FAISS_INDEX_NAME}.faiss")
+    pkl_path = os.path.join(FAISS_INDEX_DIR, f"{FAISS_INDEX_NAME}.pkl")
+    
+    if not (os.path.exists(faiss_path) and os.path.exists(pkl_path)):
+        print(f"📁 找不到現有的 FAISS 索引檔案")
+        return False
+    
+    try:
+        embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+        vector_store = FAISS.load_local(
+            FAISS_INDEX_DIR, 
+            embeddings, 
+            FAISS_INDEX_NAME,
+            allow_dangerous_deserialization=True
+        )
+        print(f"📂 已成功載入 FAISS 向量儲存")
+        return True
+    except Exception as e:
+        print(f"❌ 載入 FAISS 向量儲存時發生錯誤: {e}")
+        vector_store = None
+        return False
+
+
 def needs_re_embedding(markdown_path):
     """檢查是否需要重新 embedding"""
     if not vector_store:
@@ -62,10 +109,16 @@ def setup_rag():
         vector_store = None
         return
     
-    # 檢查是否需要重新 embedding
-    if not needs_re_embedding(markdown_path):
-        print("📄 知識庫文件未更新，跳過 embedding 程序")
-        return
+    # 首先嘗試載入現有的 FAISS 索引
+    if load_local():
+        # 檢查載入的向量儲存是否需要更新
+        if not needs_re_embedding(markdown_path):
+            print("📄 已載入現有向量儲存，知識庫文件未更新")
+            return
+        else:
+            print("📄 知識庫文件已更新，需要重新建立向量儲存")
+    else:
+        print("📄 未找到現有向量儲存，將建立新的索引")
 
     try:
         with open(markdown_path, "r", encoding="utf-8") as f:
@@ -100,9 +153,11 @@ def setup_rag():
         embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
         vector_store = FAISS.from_documents(md_header_splits, embeddings)
         
-        # 保存時間戳記
-        save_timestamp()
-        print("✅ RAG 系統已成功初始化 (使用 Markdown 分割)！")
+        # 保存向量儲存到本地
+        if save_local():
+            print("✅ RAG 系統已成功初始化並保存 (使用 Markdown 分割)！")
+        else:
+            print("⚠️  RAG 系統已初始化，但保存失敗")
         
     except FileNotFoundError:
         print(f"錯誤：無法讀取知識庫文件 {markdown_path}")
