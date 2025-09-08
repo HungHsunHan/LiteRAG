@@ -690,12 +690,24 @@
             sessionDisplay.textContent = sessionId.substring(0, 8) + '...'; // 只顯示前8位
         }
     }
-    // API URL設定 - 支援本地file://協議和網路存取
-    const API_URL = window.location.protocol === 'file:' ? 
-                   'http://127.0.0.1:8000/chat/stream' : 
-                   window.location.protocol + '//' + 
-                   (window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname) + 
-                   ':8000/chat/stream';
+    // API URL設定 - 智能選擇最適合的協議
+    function getApiUrl() {
+        const hostname = window.location.hostname === 'localhost' ? '127.0.0.1' : 
+                        (window.location.hostname || '127.0.0.1');
+        
+        if (window.location.protocol === 'file:') {
+            // 從檔案開啟時，優先使用 HTTPS
+            return 'https://127.0.0.1:8000/chat/stream';
+        } else if (window.location.protocol === 'https:') {
+            // HTTPS 頁面先嘗試 HTTPS API，如果憑證有問題會自動處理
+            return `https://${hostname}:8000/chat/stream`;
+        } else {
+            // HTTP 頁面嘗試使用 HTTPS API（語音功能需要）
+            return `https://${hostname}:8000/chat/stream`;
+        }
+    }
+    
+    const API_URL = getApiUrl();
 
     // 工具名稱映射，將技術名稱轉換為用戶友好的中文名稱
     const TOOL_NAME_MAP = {
@@ -837,9 +849,23 @@
                 const lines = chunk.split('\n');
 
                 for (const line of lines) {
+                    // 跳過空行
+                    if (!line.trim()) continue;
+                    
                     if (line.startsWith('data: ')) {
                         try {
-                            const eventData = JSON.parse(line.slice(6));
+                            const eventDataStr = line.slice(6);
+                            console.log('📨 收到 SSE 事件:', eventDataStr);
+                            
+                            // 檢查是否為空的事件資料
+                            if (!eventDataStr.trim()) {
+                                console.warn('⚠️ 收到空的 SSE 事件資料，跳過');
+                                continue;
+                            }
+                            
+                            const eventData = JSON.parse(eventDataStr);
+                            console.log('✅ 成功解析事件:', eventData.type);
+                            
                             await handleServerEvent(eventData, responseContent, {
                                 toolLogsContent,
                                 toolLogsContainer,
@@ -860,28 +886,56 @@
                                     }
                                 }
                             });
-                        } catch (e) {
-                            console.warn('解析 SSE 事件失敗:', e);
+                        } catch (parseError) {
+                            console.error('❌ 解析 SSE 事件失敗:', parseError);
+                            console.error('🔍 問題事件內容:', line);
+                            console.error('📍 事件資料片段:', line.slice(6));
+                            // 不中斷整個流程，繼續處理下一個事件
+                            continue;
                         }
+                    } else if (line.trim() && !line.startsWith(':')) {
+                        // 記錄其他類型的非空行（不是註釋）
+                        console.log('📝 收到非資料行:', line);
                     }
                 }
             }
 
         } catch (error) {
-            console.error('API 請求失敗:', error);
+            console.error('🚨 API 請求失敗:', error);
+            console.error('🚨 錯誤類型:', error.name);
+            console.error('🚨 錯誤信息:', error.message);
+            console.error('🚨 錯誤堆疊:', error.stack);
             
             let errorMessage = '抱歉，發生了錯誤。';
+            let debugInfo = '';
+            
             if (error.name === 'NetworkError' || error.message.includes('Failed to fetch')) {
                 errorMessage = '網路連線異常，請檢查網路狀態後再試。';
+                debugInfo = '可能原因：網路中斷、HTTPS 憑證問題或伺服器無法連接。';
             } else if (error.message.includes('500')) {
                 errorMessage = '伺服器內部錯誤，請稍後再試。';
+                debugInfo = '伺服器處理請求時發生內部錯誤。';
             } else if (error.message.includes('429')) {
                 errorMessage = '請求太過頻繁，請稍後再試。';
+                debugInfo = '請求頻率超過限制，請稍等片刻再試。';
             } else if (error.message.includes('401') || error.message.includes('403')) {
                 errorMessage = 'API 認證失敗，請檢查配置。';
+                debugInfo = 'API 金鑰或權限配置有問題。';
+            } else if (error.message.includes('TypeError') || error.message.includes('JSON')) {
+                errorMessage = '資料解析錯誤，請重試。';
+                debugInfo = 'SSE 事件資料格式錯誤或解析失敗。';
             }
             
-            responseContent.innerHTML = marked.parse(errorMessage);
+            // 在開發環境顯示詳細錯誤信息
+            const isDevelopment = window.location.hostname === 'localhost' || 
+                                window.location.hostname === '127.0.0.1' || 
+                                window.location.hostname.startsWith('192.168.');
+            
+            const fullErrorMessage = isDevelopment ? 
+                `${errorMessage}\n\n**調試信息：**\n${debugInfo}\n\n**技術詳情：**\n- 錯誤類型：${error.name}\n- 錯誤信息：${error.message}` : 
+                errorMessage;
+            
+            responseContent.innerHTML = marked.parse(fullErrorMessage);
         } finally {
             // 移除可能仍在的載入指示器
             if (loadingIndicator && loadingIndicator.parentNode) {
