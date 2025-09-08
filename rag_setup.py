@@ -101,14 +101,25 @@ def load_timestamp():
     return 0
 
 
-def save_timestamp():
-    """保存當前時間戳記"""
+def save_timestamp(timestamp=None):
+    """保存時間戳記
+    
+    Args:
+        timestamp: 指定的時間戳記，如果為 None 則使用當前時間
+    """
+    if timestamp is None:
+        timestamp = datetime.now().timestamp()
+    
     with open(TIMESTAMP_FILE, "w", encoding="utf-8") as f:
-        json.dump({"last_embedding_time": datetime.now().timestamp()}, f)
+        json.dump({"last_embedding_time": timestamp}, f)
 
 
-def save_local():
-    """將 FAISS 向量儲存保存到本地"""
+def save_local(timestamp=None):
+    """將 FAISS 向量儲存保存到本地
+    
+    Args:
+        timestamp: 指定的時間戳記，如果為 None 則使用當前時間
+    """
     global rag_manager
     current_store = rag_manager.vector_store
     if not current_store:
@@ -118,7 +129,7 @@ def save_local():
     try:
         os.makedirs(FAISS_INDEX_DIR, exist_ok=True)
         current_store.save_local(FAISS_INDEX_DIR, FAISS_INDEX_NAME)
-        save_timestamp()
+        save_timestamp(timestamp)
         print(f"FAISS 向量儲存已保存至 {FAISS_INDEX_DIR}/{FAISS_INDEX_NAME}")
         return True
     except Exception as e:
@@ -232,7 +243,9 @@ def setup_rag():
                 rag_manager._set_vector_store(new_vector_store)
                 
                 # 保存向量儲存到本地
-                if save_local():
+                # 使用檔案的修改時間作為 embedding 時間戳記
+                file_mtime = get_file_mtime(markdown_path)
+                if save_local(file_mtime):
                     print("RAG 系統已成功初始化並保存 (使用 Markdown 分割)！")
                 else:
                     print("RAG 系統已初始化，但保存失敗")
