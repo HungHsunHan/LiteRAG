@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>語音功能測試</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        #voice-button {
+            padding: 15px 20px;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 20px;
+            font-size: 1.2rem;
+            cursor: pointer;
+            margin: 10px;
+            transition: all 0.3s ease;
+        }
+        #voice-button:hover {
+            background-color: #218838;
+            transform: scale(1.05);
+        }
+        #voice-button.recording {
+            background-color: #dc3545;
+            animation: pulse-recording 1.5s infinite;
+        }
+        @keyframes pulse-recording {
+            0% { background-color: #dc3545; transform: scale(1); }
+            50% { background-color: #ff6b7d; transform: scale(1.1); }
+            100% { background-color: #dc3545; transform: scale(1); }
+        }
+        #test-input {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            font-size: 1rem;
+        }
+        #debug-info {
+            background-color: #f8f9fa;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        .error {
+            color: red;
+            background-color: #ffeaea;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .success {
+            color: green;
+            background-color: #eafff0;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+
+<h1>🎤 語音識別功能測試</h1>
+
+<div>
+    <button id="voice-button" title="點擊測試語音功能">🎤 開始語音輸入</button>
+    <button id="lang-toggle">切換語言 (當前: 繁體中文)</button>
+</div>
+
+<input type="text" id="test-input" placeholder="語音識別結果將顯示在這裡...">
+
+<div id="debug-info">準備中...</div>
+
+<script>
+    let recognition = null;
+    let isRecording = false;
+    let currentLang = 'zh-TW';
+    
+    const voiceButton = document.getElementById('voice-button');
+    const langToggle = document.getElementById('lang-toggle');
+    const testInput = document.getElementById('test-input');
+    const debugInfo = document.getElementById('debug-info');
+    
+    function log(message, type = 'info') {
+        const timestamp = new Date().toLocaleTimeString();
+        const logMessage = `[${timestamp}] ${message}\n`;
+        
+        if (type === 'error') {
+            debugInfo.innerHTML = `<div class="error">${logMessage}</div>` + debugInfo.innerHTML;
+            console.error(message);
+        } else if (type === 'success') {
+            debugInfo.innerHTML = `<div class="success">${logMessage}</div>` + debugInfo.innerHTML;
+            console.log(message);
+        } else {
+            debugInfo.textContent = logMessage + debugInfo.textContent;
+            console.log(message);
+        }
+    }
+    
+    // 初始化語音識別
+    function initSpeechRecognition() {
+        log('正在初始化語音識別...');
+        
+        if (!('webkitSpeechRecognition' in window)) {
+            log('❌ 此瀏覽器不支援 Web Speech API', 'error');
+            voiceButton.disabled = true;
+            voiceButton.textContent = '🚫 不支援';
+            return null;
+        }
+        
+        try {
+            const recognition = new webkitSpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = currentLang;
+            
+            log('✅ 語音識別初始化成功', 'success');
+            return recognition;
+        } catch (error) {
+            log(`❌ 初始化失敗: ${error.message}`, 'error');
+            return null;
+        }
+    }
+    
+    // 設置事件監聽器
+    function setupEvents() {
+        if (!recognition) return;
+        
+        recognition.onstart = function() {
+            log('🎤 語音識別已啟動', 'success');
+        };
+        
+        recognition.onresult = function(event) {
+            let transcript = '';
+            for (let i = 0; i < event.results.length; i++) {
+                transcript += event.results[i][0].transcript;
+            }
+            testInput.value = transcript;
+            log(`📝 識別結果: ${transcript}`);
+        };
+        
+        recognition.onend = function() {
+            log('🛑 語音識別已結束');
+            if (isRecording) {
+                // 重新啟動
+                try {
+                    recognition.start();
+                    log('🔄 重新啟動語音識別');
+                } catch (error) {
+                    log(`❌ 重新啟動失敗: ${error.message}`, 'error');
+                    stopRecognition();
+                }
+            }
+        };
+        
+        recognition.onerror = function(event) {
+            log(`❌ 語音識別錯誤: ${event.error}`, 'error');
+            if (event.error !== 'no-speech') {
+                stopRecognition();
+            }
+        };
+    }
+    
+    // 開始錄音
+    function startRecognition() {
+        if (!recognition || isRecording) return;
+        
+        log('🎯 嘗試開始語音識別...');
+        
+        // 請求麥克風權限
+        navigator.mediaDevices.getUserMedia({ audio: true })
+            .then(() => {
+                log('✅ 麥克風權限獲得', 'success');
+                
+                isRecording = true;
+                voiceButton.classList.add('recording');
+                voiceButton.textContent = '🔴 停止錄音';
+                
+                try {
+                    recognition.start();
+                    log('🚀 語音識別已啟動');
+                } catch (error) {
+                    log(`❌ 啟動失敗: ${error.message}`, 'error');
+                    stopRecognition();
+                }
+            })
+            .catch((error) => {
+                log(`❌ 麥克風權限被拒絕: ${error.message}`, 'error');
+            });
+    }
+    
+    // 停止錄音
+    function stopRecognition() {
+        log('⏹️ 停止語音識別');
+        
+        isRecording = false;
+        voiceButton.classList.remove('recording');
+        voiceButton.textContent = '🎤 開始語音輸入';
+        
+        if (recognition) {
+            try {
+                recognition.stop();
+            } catch (error) {
+                log(`❌ 停止錄音時出錯: ${error.message}`, 'error');
+            }
+        }
+    }
+    
+    // 切換語言
+    function toggleLanguage() {
+        currentLang = currentLang === 'zh-TW' ? 'en-US' : 'zh-TW';
+        const langName = currentLang === 'zh-TW' ? '繁體中文' : '英文';
+        
+        if (recognition) {
+            recognition.lang = currentLang;
+        }
+        
+        langToggle.textContent = `切換語言 (當前: ${langName})`;
+        log(`🌐 語言已切換為: ${langName}`, 'success');
+    }
+    
+    // 事件監聽器
+    voiceButton.addEventListener('click', () => {
+        log('👆 語音按鈕被點擊');
+        if (isRecording) {
+            stopRecognition();
+        } else {
+            startRecognition();
+        }
+    });
+    
+    langToggle.addEventListener('click', toggleLanguage);
+    
+    // 初始化
+    log('🚀 開始初始化語音功能...');
+    recognition = initSpeechRecognition();
+    if (recognition) {
+        setupEvents();
+        log('✅ 語音功能準備完成！點擊按鈕開始測試。', 'success');
+    } else {
+        log('❌ 語音功能初始化失敗', 'error');
+    }
+</script>
+
+</body>
+</html>

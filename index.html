@@ -122,6 +122,47 @@
             cursor: not-allowed;
         }
 
+        /* 語音按鈕樣式 */
+        #voice-button {
+            padding: 10px 12px;
+            background-color: #28a745;
+            font-size: 1.1rem;
+            min-width: 45px;
+            transition: all 0.3s ease;
+        }
+        
+        #voice-button:hover {
+            background-color: #218838;
+            transform: scale(1.05);
+        }
+        
+        #voice-button.recording {
+            background-color: #dc3545;
+            animation: pulse-recording 1.5s infinite;
+        }
+        
+        #voice-button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* 錄音脈衝動畫 */
+        @keyframes pulse-recording {
+            0% {
+                background-color: #dc3545;
+                transform: scale(1);
+            }
+            50% {
+                background-color: #ff6b7d;
+                transform: scale(1.1);
+            }
+            100% {
+                background-color: #dc3545;
+                transform: scale(1);
+            }
+        }
+
         /* Markdown 渲染後的樣式 */
         .assistant-message h1,
         .assistant-message h2,
@@ -380,6 +421,7 @@
         </div>
     <form id="chat-form">
         <input type="text" id="user-input" placeholder="在這裡輸入訊息..." autocomplete="off">
+        <button type="button" id="voice-button" title="點擊開始語音輸入">🎤</button>
         <button type="submit">Send</button>
     </form>
 </div>
@@ -392,7 +434,8 @@
     const chatForm = document.getElementById('chat-form');
     const userInput = document.getElementById('user-input');
     const newChatButton = document.getElementById('new-chat-button');
-    const sendButton = chatForm.querySelector('button');
+    const sendButton = chatForm.querySelector('button[type="submit"]');
+    const voiceButton = document.getElementById('voice-button');
 
     // 生成唯一的會話ID
     function generateSessionId() {
@@ -406,6 +449,239 @@
     // 關鍵！用這個陣列來保存對話歷史，實現「記憶」功能
     let conversationHistory = [];
     let sessionId = generateSessionId(); // 為每個瀏覽器會話生成唯一ID
+    
+    // 語音識別相關變數
+    let recognition = null;
+    let isRecording = false;
+    let silenceTimer = null;
+    let recognitionResults = '';
+    
+    // 初始化語音識別
+    function initSpeechRecognition() {
+        // 檢查瀏覽器支援
+        if (!('webkitSpeechRecognition' in window)) {
+            console.warn('此瀏覽器不支援語音識別功能');
+            voiceButton.disabled = true;
+            voiceButton.title = '此瀏覽器不支援語音識別功能';
+            voiceButton.textContent = '🚫';
+            return null;
+        }
+        
+        try {
+            const recognition = new webkitSpeechRecognition();
+            
+            // 設定語音識別參數
+            recognition.continuous = true;         // 連續識別
+            recognition.interimResults = true;     // 顯示臨時結果
+            recognition.maxAlternatives = 1;       // 最多替代方案數量
+            
+            // 支援繁體中文和英文
+            recognition.lang = 'zh-TW';  // 預設為繁體中文
+            
+            return recognition;
+        } catch (error) {
+            console.error('初始化語音識別失敗:', error);
+            voiceButton.disabled = true;
+            voiceButton.title = '語音識別初始化失敗';
+            voiceButton.textContent = '🚫';
+            return null;
+        }
+    }
+    
+    // 開始語音識別
+    function startRecognition() {
+        if (!recognition || isRecording) return;
+        
+        // 請求麥克風權限並開始錄音
+        navigator.mediaDevices.getUserMedia({ audio: true })
+            .then(() => {
+                recognitionResults = '';
+                isRecording = true;
+                
+                // 更新按鈕狀態
+                voiceButton.classList.add('recording');
+                voiceButton.title = '點擊停止錄音或等待自動停止';
+                
+                try {
+                    recognition.start();
+                    console.log('語音識別已啟動');
+                } catch (error) {
+                    console.error('啟動語音識別失敗:', error);
+                    showErrorMessage('啟動語音識別失敗，請重試');
+                    stopRecognition();
+                }
+            })
+            .catch((error) => {
+                console.error('麥克風權限被拒絕:', error);
+                showErrorMessage('需要麥克風權限才能使用語音輸入功能');
+            });
+    }
+    
+    // 停止語音識別
+    function stopRecognition() {
+        if (!recognition || !isRecording) return;
+        
+        isRecording = false;
+        
+        // 清除靜音定時器
+        if (silenceTimer) {
+            clearTimeout(silenceTimer);
+            silenceTimer = null;
+        }
+        
+        // 更新按鈕狀態
+        voiceButton.classList.remove('recording');
+        voiceButton.title = '點擊開始語音輸入';
+        
+        try {
+            recognition.stop();
+        } catch (error) {
+            console.error('停止語音識別失敗:', error);
+        }
+        
+        // 如果有識別結果，填入輸入框
+        if (recognitionResults.trim()) {
+            userInput.value = recognitionResults.trim();
+            userInput.focus();
+        }
+    }
+    
+    // 設置語音識別事件處理器
+    function setupSpeechRecognitionEvents() {
+        if (!recognition) return;
+        
+        // 開始識別
+        recognition.onstart = function() {
+            console.log('語音識別已啟動');
+        };
+        
+        // 識別結果
+        recognition.onresult = function(event) {
+            let finalTranscript = '';
+            let interimTranscript = '';
+            
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+                const transcript = event.results[i][0].transcript;
+                if (event.results[i].isFinal) {
+                    finalTranscript += transcript;
+                } else {
+                    interimTranscript += transcript;
+                }
+            }
+            
+            // 更新結果
+            if (finalTranscript) {
+                recognitionResults += finalTranscript;
+            }
+            
+            // 即時更新輸入框（顯示最終結果 + 臨時結果）
+            const displayText = recognitionResults + interimTranscript;
+            userInput.value = displayText;
+            
+            // 重置靜音定時器
+            resetSilenceTimer();
+        };
+        
+        // 識別結束
+        recognition.onend = function() {
+            if (isRecording) {
+                // 如果還在錄音狀態但識別結束了，重新啟動
+                try {
+                    recognition.start();
+                } catch (error) {
+                    console.error('重新啟動語音識別失敗:', error);
+                    stopRecognition();
+                }
+            }
+        };
+        
+        // 識別錯誤
+        recognition.onerror = function(event) {
+            console.error('語音識別錯誤:', event.error);
+            
+            let errorMessage = '';
+            switch (event.error) {
+                case 'no-speech':
+                    // 沒有檢測到語音，不需要顯示錯誤
+                    return;
+                case 'network':
+                    errorMessage = '網路連線問題，請檢查網路後重試';
+                    break;
+                case 'not-allowed':
+                    errorMessage = '麥克風權限被拒絕，請允許麥克風權限後重試';
+                    break;
+                case 'service-not-allowed':
+                    errorMessage = '語音識別服務被禁用';
+                    break;
+                case 'bad-grammar':
+                    errorMessage = '語法錯誤';
+                    break;
+                case 'language-not-supported':
+                    errorMessage = '不支援的語言';
+                    break;
+                default:
+                    errorMessage = `語音識別錯誤: ${event.error}`;
+            }
+            
+            if (errorMessage) {
+                showErrorMessage(errorMessage);
+            }
+            stopRecognition();
+        };
+    }
+    
+    // 重置靜音定時器
+    function resetSilenceTimer() {
+        if (silenceTimer) {
+            clearTimeout(silenceTimer);
+        }
+        
+        // 4秒無語音自動停止
+        silenceTimer = setTimeout(() => {
+            if (isRecording) {
+                console.log('偵測到靜音，自動停止錄音');
+                stopRecognition();
+            }
+        }, 4000);
+    }
+    
+    // 顯示錯誤訊息
+    function showErrorMessage(message) {
+        // 創建臨時訊息元素
+        const errorDiv = document.createElement('div');
+        errorDiv.classList.add('message', 'assistant-message');
+        errorDiv.style.backgroundColor = '#f8d7da';
+        errorDiv.style.borderColor = '#f5c6cb';
+        errorDiv.style.color = '#721c24';
+        errorDiv.textContent = `⚠️ ${message}`;
+        
+        chatBox.appendChild(errorDiv);
+        scrollToBottom();
+        
+        // 3秒後自動移除錯誤訊息
+        setTimeout(() => {
+            if (errorDiv && errorDiv.parentNode) {
+                errorDiv.remove();
+            }
+        }, 3000);
+    }
+    
+    // 切換語言（繁體中文 ↔ 英文）
+    function toggleLanguage() {
+        if (!recognition) return;
+        
+        const currentLang = recognition.lang;
+        const newLang = currentLang === 'zh-TW' ? 'en-US' : 'zh-TW';
+        recognition.lang = newLang;
+        
+        const langName = newLang === 'zh-TW' ? '繁體中文' : '英文';
+        console.log(`語音識別語言已切換為: ${langName}`);
+        
+        // 更新按鈕提示
+        if (!isRecording) {
+            voiceButton.title = `點擊開始語音輸入 (${langName})`;
+        }
+    }
     
     // 更新會話ID顯示
     function updateSessionDisplay() {
@@ -446,6 +722,45 @@
         await getAIResponse(userQuery); // 呼叫後端取得 AI 回覆
         
         toggleForm(false); // 啟用表單
+    });
+
+    // 監聽語音按鈕點擊事件
+    voiceButton.addEventListener('click', () => {
+        console.log('🎯 語音按鈕被點擊, isRecording:', isRecording);
+        if (isRecording) {
+            console.log('⏹️ 停止錄音');
+            stopRecognition();
+        } else {
+            console.log('🎤 開始錄音');
+            startRecognition();
+        }
+    });
+    
+    // 雙擊語音按鈕切換語言
+    voiceButton.addEventListener('dblclick', (e) => {
+        e.preventDefault();
+        if (!isRecording) {
+            toggleLanguage();
+        }
+    });
+    
+    // 鍵盤快捷鍵支援
+    document.addEventListener('keydown', (e) => {
+        // Ctrl + M 或 Ctrl + Shift + V 啟動語音輸入
+        if ((e.ctrlKey && e.key === 'm') || (e.ctrlKey && e.shiftKey && e.key === 'V')) {
+            e.preventDefault();
+            if (isRecording) {
+                stopRecognition();
+            } else {
+                startRecognition();
+            }
+        }
+        
+        // 錄音時 Escape 鍵停止錄音
+        if (e.key === 'Escape' && isRecording) {
+            e.preventDefault();
+            stopRecognition();
+        }
     });
 
     // 監聽新對話按鈕點擊事件
@@ -837,6 +1152,24 @@
     // -------------------------------------------------------------
     updateSessionDisplay(); // 初始化會話ID顯示
     displayMessage('assistant', 'Hello！How can I help you？');
+    
+    // 初始化語音識別
+    try {
+        console.log('🚀 開始初始化語音識別功能...');
+        console.log('voiceButton:', voiceButton);
+        console.log('webkitSpeechRecognition 支援:', 'webkitSpeechRecognition' in window);
+        
+        recognition = initSpeechRecognition();
+        if (recognition) {
+            setupSpeechRecognitionEvents();
+            voiceButton.title = '點擊開始語音輸入 (繁體中文)\n• 雙擊切換語言\n• Ctrl+M 快捷鍵\n• Esc 停止錄音';
+            console.log('✅ 語音識別初始化成功');
+        } else {
+            console.log('❌ 語音識別初始化失敗');
+        }
+    } catch (error) {
+        console.error('❌ 語音識別初始化過程出錯:', error);
+    }
 
 </script>
 </body>
