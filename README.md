@@ -224,3 +224,13 @@ RRRC_chatbot/
 
 Issues and Pull Requests are welcome!
 
+## Notes
+
+If using Mac and want to use ip address not localhost, please turn off the firewall.sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate off
+
+1. 新開瀏覽器分頁 → 訪問 https://192.168.0.46:8000
+2. 接受憑證警告 → 點擊"進階"→"繼續前往"
+3. 確認連接 → 看到 {"detail":"Not Found"} 就成功了
+4. 回到前端 → 重新載入 https://192.168.0.46:3000
+5. 測試功能 → 輸入問題測試
+
