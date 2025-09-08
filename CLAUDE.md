@@ -3,7 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Python Environment
-**Required**: `/usr/local/Caskroom/miniforge/base/envs/llm`
+**Required**: `C:\Users\hunghsun\AppData\Local\anaconda3\envs\llm`
 
 ## Development Commands
 

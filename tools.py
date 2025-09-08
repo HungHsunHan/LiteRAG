@@ -3,7 +3,7 @@ import re
 import time
 from duckduckgo_search import DDGS
 
-from rag_setup import search_knowledge_base
+from rag_setup import rag_manager
 
 
 # 1. RAG 工具
@@ -16,9 +16,10 @@ def local_rag_search(query: str):
     - 內部文檔內容
     
     回傳格式會標明「從知識庫中找到的相關資訊」。
+    使用線程安全的 RAGManager 進行搜尋。
     """
-    print(f"Executing RAG search for: {query}")
-    return search_knowledge_base(query)
+    print(f"Executing thread-safe RAG search for: {query}")
+    return rag_manager.search_knowledge_base(query)
 
 
 # 2. 網路搜尋工具

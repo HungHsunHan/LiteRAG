@@ -12,7 +12,7 @@ from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 
-from rag_setup import setup_rag
+from rag_setup import setup_rag, rag_manager
 from tools import available_tools, tools_specs
 
 
