@@ -69,10 +69,8 @@ app = FastAPI(lifespan=lifespan)
 origins = [
     "http://localhost",
     "http://127.0.0.1",
-    "http://192.168.0.46",  # 本機局域網IP
     "https://localhost",
     "https://127.0.0.1", 
-    "https://192.168.0.46",  # 本機局域網IP HTTPS
     "null",  # 允許從本地 file:// 協議發出的請求
     "*",  # 允許所有來源（僅用於開發測試）
 ]

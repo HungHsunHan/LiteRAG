@@ -3,3 +3,8 @@
 .claude
 article.md
 article_en.md
+
+# SSL certificates (auto-generated)
+server.crt
+server.key
+*.pem

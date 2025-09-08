@@ -10,6 +10,7 @@ An AI assistant that combines RAG (Retrieval-Augmented Generation) with web sear
 - 💬 **Conversation Memory**: Multi-turn conversation context support
 - 📱 **Lightweight Frontend**: Pure HTML/CSS/JS implementation, no additional frameworks needed
 - 🔄 **Streaming Response**: Real-time AI response display
+- 🎤 **Voice Input**: Speech-to-text functionality (requires HTTPS)
 
 ## 🖥️ User Interface
 
@@ -115,6 +116,25 @@ npx serve . -p 3000
 Then open in browser:
 - Backend API: http://localhost:8000
 - Frontend Interface: http://localhost:3000 or directly open index.html
+
+### 4. Quick Start (Recommended)
+
+Use the provided startup script for the best experience:
+
+```bash
+python start_server.py
+```
+
+This script will:
+- Automatically generate SSL certificates for HTTPS (required for voice features)
+- Start both backend and frontend servers
+- Open the application in your browser
+
+Access the application at:
+- **HTTPS (recommended)**: https://localhost:3000 or https://127.0.0.1:3000
+- **HTTP (fallback)**: http://localhost:3001
+
+⚠️ **Note**: Voice input functionality requires HTTPS. The script automatically generates self-signed certificates.
 
 ## 📋 Usage Instructions
 

@@ -7,13 +7,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Development Commands
 
-### Server Startup
+### Server Startup (Recommended)
+```bash
+# Use the startup script for best experience (includes SSL certificate generation)
+python start_server.py
+```
+
+### Manual Server Startup
 ```bash
 # Activate environment and start backend API server
 source /usr/local/Caskroom/miniforge/base/etc/profile.d/conda.sh && conda activate llm && uvicorn main:app --host 0.0.0.0 --port 8000
+```
 
-# Or use the convenience script (starts both backend and frontend)
-python start_server.py
+### SSL Certificate Generation
+```bash
+# Generate SSL certificates for HTTPS/WebRTC support
+python generate_cert.py
 ```
 
 ### Frontend Access

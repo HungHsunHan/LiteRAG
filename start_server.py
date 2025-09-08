@@ -10,6 +10,8 @@ import http.server
 import socketserver
 import ssl
 import os
+import subprocess
+import sys
 
 def get_local_ip():
     """獲取本機局域網IP地址"""
@@ -20,6 +22,32 @@ def get_local_ip():
             return s.getsockname()[0]
     except Exception:
         return "127.0.0.1"
+
+def ensure_certificates():
+    """確保SSL憑證存在，如果不存在則自動生成"""
+    cert_file = "server.crt"
+    key_file = "server.key"
+    
+    if os.path.exists(cert_file) and os.path.exists(key_file):
+        print("✓ SSL憑證已存在")
+        return True
+    
+    print("⚠️  未找到SSL憑證，正在自動生成...")
+    try:
+        # 執行憑證生成腳本
+        result = subprocess.run([sys.executable, "generate_cert.py"], 
+                               capture_output=True, text=True)
+        if result.returncode == 0:
+            print("✓ SSL憑證生成成功")
+            return True
+        else:
+            print(f"❌ 憑證生成失敗: {result.stderr}")
+            print("🔧 請手動執行: python generate_cert.py")
+            return False
+    except Exception as e:
+        print(f"❌ 執行憑證生成時出錯: {e}")
+        print("🔧 請手動執行: python generate_cert.py")
+        return False
 
 def start_frontend_server():
     """啟動前端HTTPS伺服器"""
@@ -36,6 +64,13 @@ if __name__ == "__main__":
     local_ip = get_local_ip()
     print(f"🚀 正在啟動 RAG 聊天機器人伺服器...")
     print(f"📍 本機IP地址: {local_ip}")
+    print("-" * 50)
+    
+    # 確保SSL憑證存在
+    if not ensure_certificates():
+        print("❌ SSL憑證設置失敗，將無法使用HTTPS")
+        print("💡 仍可以使用HTTP，但語音功能將不可用")
+    
     print("-" * 50)
     print(f"🖥️  後端API:")
     print(f"   HTTPS本地: https://127.0.0.1:8000")
