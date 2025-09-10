@@ -2,6 +2,7 @@
 import re
 import time
 from duckduckgo_search import DDGS
+from google.genai import types
 
 from rag_setup import rag_manager
 
@@ -165,43 +166,37 @@ available_tools = {
     "web_search": web_search,
 }
 
-# Gemini function calling 格式的工具定義
-gemini_tools = [local_rag_search, web_search]
-
-# 為了向後兼容，保留 OpenAI 格式的工具規格（但不會使用）
-tools_specs = [
+# Google Gemini 官方格式的工具定義
+gemini_function_declarations = [
     {
-        "type": "function",
-        "function": {
-            "name": "local_rag_search",
-            "description": "查詢本地知識庫中的專業資訊，包括博物館收藏品、歷史文物、內部文檔等已存儲的知識內容。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "要搜尋的具體問題、關鍵字、或描述性句子",
-                    },
+        "name": "local_rag_search",
+        "description": "查詢本地知識庫中的專業資訊，包括博物館收藏品、歷史文物、內部文檔等已存儲的知識內容。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "要搜尋的具體問題、關鍵字、或描述性句子",
                 },
-                "required": ["query"],
             },
+            "required": ["query"],
         },
     },
     {
-        "type": "function",
-        "function": {
-            "name": "web_search",
-            "description": "搜尋網路上的最新即時資訊，包括時事新聞、股價匯率、天氣資訊、最新科技發展等本地知識庫未涵蓋的內容。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "要搜尋的具體問題，例如：'今日台股指數'、'最新COVID疫情'、'OpenAI最新消息'、'台北天氣預報'",
-                    },
+        "name": "web_search",
+        "description": "搜尋網路上的最新即時資訊，包括時事新聞、股價匯率、天氣資訊、最新科技發展等本地知識庫未涵蓋的內容。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "要搜尋的具體問題，例如：'今日台股指數'、'最新COVID疫情'、'OpenAI最新消息'、'台北天氣預報'",
                 },
-                "required": ["query"],
             },
+            "required": ["query"],
         },
     },
 ]
+
+# 創建 Google Gemini 官方格式的 Tool 對象
+gemini_tools = types.Tool(function_declarations=gemini_function_declarations)

@@ -158,7 +158,7 @@ async def stream_generator(messages: list):
         # 設定 Gemini 配置
         config = types.GenerateContentConfig(
             system_instruction=system_instruction,
-            tools=gemini_tools,
+            tools=[gemini_tools],
             temperature=0.3,
         )
         
@@ -336,7 +336,7 @@ async def process_chat_request(messages: list) -> Dict[str, Any]:
         # 設定 Gemini 配置
         config = types.GenerateContentConfig(
             system_instruction=system_instruction,
-            tools=gemini_tools,
+            tools=[gemini_tools],
             temperature=0.3,
         )
         
@@ -361,7 +361,10 @@ async def process_chat_request(messages: list) -> Dict[str, Any]:
             # 構建 function response 給 Gemini
             function_responses = []
             
-            for function_call in function_calls:
+            # 過濾掉無效的 function calls
+            valid_function_calls = [fc for fc in function_calls if fc is not None and hasattr(fc, 'name')]
+            
+            for function_call in valid_function_calls:
                 tool_name = function_call.name
                 tool_args = dict(function_call.args) if hasattr(function_call, 'args') else {}
                 tools_used.append({"name": tool_name, "arguments": tool_args})
