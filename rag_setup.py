@@ -3,12 +3,14 @@ import os
 import json
 import threading
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
 from dotenv import load_dotenv
 from langchain.text_splitter import MarkdownHeaderTextSplitter
 from langchain_community.vectorstores import FAISS
-from langchain_openai import OpenAIEmbeddings
+from langchain_core.embeddings import Embeddings
+from google import genai
+from google.genai import types
 
 load_dotenv(override=True)
 
@@ -17,56 +19,99 @@ FAISS_INDEX_DIR = "faiss_index"
 FAISS_INDEX_NAME = "knowledge_base"
 
 
+class GeminiEmbeddings(Embeddings):
+    """自定義 Gemini Embeddings 類，與 LangChain 兼容"""
+
+    def __init__(self, model: str = "gemini-embedding-001"):
+        super().__init__()
+        self.model = model
+        # Configure the client upon initialization
+        self.client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        """嵌入多個文檔"""
+        embeddings = []
+        for text in texts:
+            try:
+                # The correct way to get the embedding response
+                result = self.client.models.embed_content(
+                    model=self.model,
+                    contents=text
+                )
+                # Correctly access the vector via result.embeddings[0].values
+                embeddings.append(result.embeddings[0].values)
+            except Exception as e:
+                print(f"嵌入文檔時發生錯誤: {e}")
+                # For gemini-embedding-001, the dimensionality is 3072.
+                embeddings.append([0.0] * 3072)
+        return embeddings
+
+    def embed_query(self, text: str) -> List[float]:
+        """嵌入單個查詢"""
+        try:
+            # The correct way to get the embedding response
+            result = self.client.models.embed_content(
+                model=self.model,
+                contents=text
+            )
+            # Correctly access the vector via result.embeddings[0].values
+            return result.embeddings[0].values
+        except Exception as e:
+            print(f"嵌入查詢時發生錯誤: {e}")
+            # Return zero vector as a fallback
+            return [0.0] * 3072
+
+
 class RAGManager:
     """線程安全的 RAG 向量儲存管理器"""
-    
+
     def __init__(self):
         self._vector_store: Optional[FAISS] = None
         self._lock = threading.RLock()  # 使用可重入鎖
         self._is_loading = False
         self._load_event = threading.Event()
-        
+
     @property
     def vector_store(self) -> Optional[FAISS]:
         """安全地獲取向量儲存實例"""
         with self._lock:
             return self._vector_store
-            
+
     def _set_vector_store(self, store: Optional[FAISS]) -> None:
         """安全地設置向量儲存實例"""
         with self._lock:
             self._vector_store = store
-            
+
     def is_ready(self) -> bool:
         """檢查 RAG 系統是否已準備就緒"""
         with self._lock:
             return self._vector_store is not None
-            
+
     def wait_for_ready(self, timeout: float = 30.0) -> bool:
         """等待 RAG 系統準備就緒，帶超時機制"""
         if self.is_ready():
             return True
-            
+
         # 如果正在載入，等待載入完成
         if self._is_loading:
             return self._load_event.wait(timeout)
-            
+
         return False
-        
+
     def search_knowledge_base(self, query: str, k: int = 3) -> str:
         """線程安全的知識庫搜尋"""
         # 等待系統準備就緒
         if not self.wait_for_ready():
             return "知識庫尚未準備就緒，請稍後再試。"
-            
+
         with self._lock:
             if not self._vector_store:
                 return "知識庫尚未初始化。"
-                
+
             try:
                 retriever = self._vector_store.as_retriever(search_kwargs={"k": k})
                 relevant_docs = retriever.invoke(query)
-                
+
                 context = "\n\n---\n\n".join(
                     [
                         f"來源: {doc.metadata.get('Header 2', '')} > {doc.metadata.get('Header 3', '')}\n內容: {doc.page_content}"
@@ -91,32 +136,40 @@ def get_file_mtime(file_path):
 
 
 def load_timestamp():
-    """載入上次 embedding 的時間戳記"""
+    """載入上次 embedding 的時間戳記和模型資訊"""
     if os.path.exists(TIMESTAMP_FILE):
         try:
             with open(TIMESTAMP_FILE, "r", encoding="utf-8") as f:
-                return json.load(f).get("last_embedding_time", 0)
+                data = json.load(f)
+                return {
+                    "last_embedding_time": data.get("last_embedding_time", 0),
+                    "embedding_model": data.get("embedding_model", ""),
+                }
         except:
-            return 0
-    return 0
+            return {"last_embedding_time": 0, "embedding_model": ""}
+    return {"last_embedding_time": 0, "embedding_model": ""}
 
 
 def save_timestamp(timestamp=None):
-    """保存時間戳記
-    
+    """保存時間戳記和模型資訊
+
     Args:
         timestamp: 指定的時間戳記，如果為 None 則使用當前時間
     """
     if timestamp is None:
         timestamp = datetime.now().timestamp()
-    
+
+    embedding_model = os.getenv("GEMINI_EMBEDDING_MODEL", "gemini-embedding-001")
+
     with open(TIMESTAMP_FILE, "w", encoding="utf-8") as f:
-        json.dump({"last_embedding_time": timestamp}, f)
+        json.dump(
+            {"last_embedding_time": timestamp, "embedding_model": embedding_model}, f
+        )
 
 
 def save_local(timestamp=None):
     """將 FAISS 向量儲存保存到本地
-    
+
     Args:
         timestamp: 指定的時間戳記，如果為 None 則使用當前時間
     """
@@ -125,7 +178,7 @@ def save_local(timestamp=None):
     if not current_store:
         print("❌ 無法保存：向量儲存尚未初始化")
         return False
-    
+
     try:
         os.makedirs(FAISS_INDEX_DIR, exist_ok=True)
         current_store.save_local(FAISS_INDEX_DIR, FAISS_INDEX_NAME)
@@ -140,21 +193,23 @@ def save_local(timestamp=None):
 def load_local():
     """從本地載入 FAISS 向量儲存"""
     global rag_manager
-    
+
     faiss_path = os.path.join(FAISS_INDEX_DIR, f"{FAISS_INDEX_NAME}.faiss")
     pkl_path = os.path.join(FAISS_INDEX_DIR, f"{FAISS_INDEX_NAME}.pkl")
-    
+
     if not (os.path.exists(faiss_path) and os.path.exists(pkl_path)):
         print(f"找不到現有的 FAISS 索引檔案")
         return False
-    
+
     try:
-        embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+        embeddings = GeminiEmbeddings(
+            model=os.getenv("GEMINI_EMBEDDING_MODEL", "gemini-embedding-001")
+        )
         loaded_store = FAISS.load_local(
-            FAISS_INDEX_DIR, 
-            embeddings, 
+            FAISS_INDEX_DIR,
+            embeddings,
             FAISS_INDEX_NAME,
-            allow_dangerous_deserialization=True
+            allow_dangerous_deserialization=True,
         )
         rag_manager._set_vector_store(loaded_store)
         print(f"已成功載入 FAISS 向量儲存")
@@ -169,32 +224,51 @@ def needs_re_embedding(markdown_path):
     """檢查是否需要重新 embedding"""
     if not rag_manager.vector_store:
         return True
-    
+
     file_mtime = get_file_mtime(markdown_path)
-    last_embedding_time = load_timestamp()
-    
-    return file_mtime > last_embedding_time
+    timestamp_data = load_timestamp()
+    last_embedding_time = timestamp_data["last_embedding_time"]
+    last_embedding_model = timestamp_data["embedding_model"]
+
+    current_embedding_model = os.getenv(
+        "GEMINI_EMBEDDING_MODEL", "gemini-embedding-001"
+    )
+
+    # 檢查文件是否有更新或模型是否變更
+    if file_mtime > last_embedding_time:
+        print(f"知識庫文件已更新，需要重新 embedding")
+        return True
+
+    if last_embedding_model != current_embedding_model:
+        print(
+            f"Embedding 模型已從 '{last_embedding_model}' 變更為 '{current_embedding_model}'，需要重新 embedding"
+        )
+        return True
+
+    return False
 
 
 def setup_rag():
     """設置 RAG 系統，使用線程安全的管理器"""
     global rag_manager
-    
+
     with rag_manager._lock:
         # 設置載入狀態
         rag_manager._is_loading = True
         rag_manager._load_event.clear()
-        
+
         try:
             # 知識庫文件路徑 - 從環境變數讀取，預設為相對路徑
-            markdown_path = os.getenv("KNOWLEDGE_BASE_PATH", "docs/Museum_Collection_Info.md")
+            markdown_path = os.getenv(
+                "KNOWLEDGE_BASE_PATH", "docs/Museum_Collection_Info.md"
+            )
 
             if not os.path.exists(markdown_path):
                 print(f"錯誤：找不到知識庫文件 {markdown_path}")
                 print(f"請確保檔案路徑正確，或設置 KNOWLEDGE_BASE_PATH 環境變數")
                 rag_manager._set_vector_store(None)
                 return
-            
+
             # 首先嘗試載入現有的 FAISS 索引
             if load_local():
                 # 檢查載入的向量儲存是否需要更新
@@ -236,12 +310,14 @@ def setup_rag():
                 # 3. 建立 embeddings 和向量儲存
                 # LangChain 的 FAISS.from_documents 會自動處理 Document 物件
                 print("正在重新建立向量儲存...")
-                embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+                embeddings = GeminiEmbeddings(
+                    model=os.getenv("GEMINI_EMBEDDING_MODEL", "gemini-embedding-001")
+                )
                 new_vector_store = FAISS.from_documents(md_header_splits, embeddings)
-                
+
                 # 安全地設置新的向量儲存
                 rag_manager._set_vector_store(new_vector_store)
-                
+
                 # 保存向量儲存到本地
                 # 使用檔案的修改時間作為 embedding 時間戳記
                 file_mtime = get_file_mtime(markdown_path)
@@ -249,7 +325,7 @@ def setup_rag():
                     print("RAG 系統已成功初始化並保存 (使用 Markdown 分割)！")
                 else:
                     print("RAG 系統已初始化，但保存失敗")
-                
+
             except FileNotFoundError:
                 print(f"錯誤：無法讀取知識庫文件 {markdown_path}")
                 rag_manager._set_vector_store(None)
@@ -259,7 +335,7 @@ def setup_rag():
             except Exception as e:
                 print(f"錯誤：初始化 RAG 系統時發生未預期的錯誤: {e}")
                 rag_manager._set_vector_store(None)
-                
+
         finally:
             # 完成載入，通知等待的線程
             rag_manager._is_loading = False

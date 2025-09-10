@@ -23,16 +23,17 @@ python start_server.py
 
 ### Dependencies Installation
 ```bash
-pip install fastapi uvicorn openai python-dotenv
-pip install langchain langchain-openai langchain-community
+pip install fastapi uvicorn google-genai python-dotenv
+pip install langchain langchain-core langchain-community
 pip install faiss-cpu duckduckgo-search
 ```
 
 ### Environment Configuration
 Create `.env` file (use `.env.example` as template):
 ```env
-OPENAI_API_KEY=your_api_key_here
-OPENAI_MODEL=gpt-4o
+GEMINI_API_KEY=your_gemini_api_key_here
+GEMINI_MODEL=gemini-2.5-flash
+GEMINI_EMBEDDING_MODEL=gemini-embedding-001
 KNOWLEDGE_BASE_PATH=docs/Museum_Collection_Info.md
 ```
 
@@ -43,19 +44,19 @@ KNOWLEDGE_BASE_PATH=docs/Museum_Collection_Info.md
 
 ### Backend Architecture (`main.py`)
 - **FastAPI**: Streaming SSE API endpoint `/chat/stream`
-- **OpenAI Integration**: GPT-4o with function calling for tools
-- **Streaming Pattern**: Two-phase OpenAI calls (tool decision → tool execution → final response)
+- **Google Gemini Integration**: Gemini-2.5-flash with function calling for tools
+- **Streaming Pattern**: Two-phase Gemini calls (tool decision → tool execution → final response)
 - **Event System**: Custom callback handler streams tool execution events to frontend
 
 ### RAG System (`rag_setup.py`)
-- **LangChain + FAISS**: Vector store with OpenAI embeddings (`text-embedding-3-small`)
+- **LangChain + FAISS**: Vector store with Gemini embeddings (`gemini-embedding-001`)
 - **Auto Re-indexing**: Checks file timestamps, rebuilds only when knowledge base changes
 - **Markdown Processing**: MarkdownHeaderTextSplitter for structured chunking
 - **Timestamp Tracking**: `rag_timestamp.json` prevents unnecessary re-embedding
 
 ### Tool System (`tools.py`)
 - **Dual Tools**: `local_rag_search` (knowledge base) + `web_search` (DuckDuckGo)
-- **Automatic Selection**: OpenAI determines tool usage based on query
+- **Automatic Selection**: Gemini determines tool usage based on query
 - **Structured Output**: Tools return formatted results with source attribution
 
 ### Frontend (`index.html`)
@@ -93,9 +94,9 @@ Currently allows all origins (`*`) for development. In `main.py:63-69`, modify `
 
 ### Streaming Response Pattern
 The system uses a two-phase approach:
-1. **Phase 1**: OpenAI decides which tools to use
+1. **Phase 1**: Gemini decides which tools to use
 2. **Tool Execution**: Execute tools and stream events to frontend
-3. **Phase 2**: OpenAI generates final response using tool results
+3. **Phase 2**: Gemini generates final response using tool results
 
 ### Tool Execution Events
 Frontend receives these SSE event types:

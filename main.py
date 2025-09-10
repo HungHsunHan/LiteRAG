@@ -9,11 +9,12 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from openai import AsyncOpenAI
+from google import genai
+from google.genai import types
 from pydantic import BaseModel
 
 from rag_setup import setup_rag, rag_manager
-from tools import available_tools, tools_specs
+from tools import available_tools, gemini_tools
 
 
 class StreamingCallbackHandler:
@@ -82,14 +83,14 @@ app.add_middleware(
     allow_headers=["*"],  # 允許所有標頭
 )
 
-# 載入環境變數 (OPENAI_API_KEY)
+# 載入環境變數
 load_dotenv(override=True)
 
 # 配置參數
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")  # 預設使用 gpt-4o
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
-# 初始化 OpenAI client
-client = AsyncOpenAI()
+# 初始化 Gemini client
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 
 # 定義請求的資料結構
@@ -109,12 +110,10 @@ class ChatResponse(BaseModel):
 
 async def stream_generator(messages: list):
     """
-    處理與 OpenAI 的互動並生成 SSE 事件流的核心函數。
+    處理與 Gemini 的互動並生成 SSE 事件流的核心函數。
     """
     # 添加 RAG 系統提示
-    system_prompt = {
-        "role": "system",
-        "content": """你是一個專業的RAG（檢索增強生成）助手。請嚴格遵循以下準則：
+    system_instruction = """你是一個專業的RAG（檢索增強生成）助手。請嚴格遵循以下準則：
 
 【核心原則】
 1. 你只能基於搜索工具返回的結果來回答問題
@@ -138,96 +137,82 @@ async def stream_generator(messages: list):
 - 禁止基於常識或訓練數據直接回答（必須先搜索）
 - 禁止省略資訊來源的標註
 
-記住：你是RAG系統，資訊的可靠性和來源透明度是你的核心價值。""",
-    }
+記住：你是RAG系統，資訊的可靠性和來源透明度是你的核心價值。"""
 
-    # 將系統提示插入到訊息列表開頭
-    if not messages or messages[0].get("role") != "system":
-        messages.insert(0, system_prompt)
+    # 轉換訊息格式為 Gemini 格式（移除 system role，使用 system_instruction）
+    gemini_messages = []
+    for msg in messages:
+        if msg.get("role") == "system":
+            continue  # 跳過 system 訊息，使用 system_instruction 代替
+        elif msg.get("role") == "user":
+            gemini_messages.append({"role": "user", "parts": [{"text": msg["content"]}]})
+        elif msg.get("role") == "assistant":
+            gemini_messages.append({"role": "model", "parts": [{"text": msg["content"]}]})
 
     # 創建事件佇列和回調處理器
     event_queue = asyncio.Queue()
     callback_handler = StreamingCallbackHandler(event_queue)
 
-    # === 步驟 1: 第一次呼叫 OpenAI，判斷是否需要使用工具 ===
+    # === 步驟 1: 第一次呼叫 Gemini，判斷是否需要使用工具 ===
     try:
-        first_response_stream = await client.chat.completions.create(
-            model=OPENAI_MODEL,
-            messages=messages,
-            tools=tools_specs,
-            tool_choice="auto",
-            stream=True,
+        # 設定 Gemini 配置
+        config = types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            tools=gemini_tools,
+            temperature=0.3,
+        )
+        
+        first_response_stream = client.models.generate_content_stream(
+            model=GEMINI_MODEL,
+            contents=gemini_messages,
+            config=config,
         )
 
-        tool_calls = {}
+        function_calls = []
         has_content = False
+        collected_content = ""
 
         # 處理第一次回覆的流
-        async for chunk in first_response_stream:
-            # 處理工具呼叫
-            if chunk.choices[0].delta.tool_calls:
-                for tool_call_delta in chunk.choices[0].delta.tool_calls:
-                    if tool_call_delta.id:
-                        if tool_call_delta.id not in tool_calls:
-                            tool_calls[tool_call_delta.id] = {
-                                "id": tool_call_delta.id,
-                                "type": "function",
-                                "function": {"name": "", "arguments": ""},
-                            }
-
-                        if tool_call_delta.function:
-                            if tool_call_delta.function.name:
-                                tool_calls[tool_call_delta.id]["function"][
-                                    "name"
-                                ] += tool_call_delta.function.name
-                            if tool_call_delta.function.arguments:
-                                tool_calls[tool_call_delta.id]["function"][
-                                    "arguments"
-                                ] += tool_call_delta.function.arguments
-                    else:
-                        if (
-                            tool_calls
-                            and tool_call_delta.function
-                            and tool_call_delta.function.arguments
-                        ):
-                            last_tool_id = list(tool_calls.keys())[-1]
-                            tool_calls[last_tool_id]["function"][
-                                "arguments"
-                            ] += tool_call_delta.function.arguments
-
-            # 處理內容回覆
-            if content := chunk.choices[0].delta.content:
+        for chunk in first_response_stream:
+            # 處理文本內容
+            if hasattr(chunk, 'text') and chunk.text:
                 has_content = True
-                yield f"data: {json.dumps({'type': 'content', 'content': content}, ensure_ascii=False)}\n\n"
+                collected_content += chunk.text
+                yield f"data: {json.dumps({'type': 'content', 'content': chunk.text}, ensure_ascii=False)}\n\n"
+            
+            # 處理 function calls
+            if hasattr(chunk, 'candidates') and chunk.candidates:
+                candidate = chunk.candidates[0]
+                if hasattr(candidate, 'content') and candidate.content:
+                    if hasattr(candidate.content, 'parts'):
+                        for part in candidate.content.parts:
+                            if hasattr(part, 'function_call') and part.function_call:
+                                function_calls.append(part.function_call)
 
         # 如果沒有工具呼叫，直接結束
-        if not tool_calls:
+        if not function_calls:
             if not has_content:
                 yield f"data: {json.dumps({'type': 'content', 'content': '我理解了你的問題，但目前沒有需要額外資訊來回答。'}, ensure_ascii=False)}\n\n"
-            yield f"data: {json.dumps({'type': 'agent_finish', 'final_answer': ''}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'agent_finish', 'final_answer': collected_content}, ensure_ascii=False)}\n\n"
             return
 
     except Exception as e:
-        print(f"Error during first OpenAI call: {e}")
-        yield f"data: {json.dumps({'type': 'error', 'message': f'與 OpenAI 互動時發生錯誤: {e}'}, ensure_ascii=False)}\n\n"
+        print(f"Error during first Gemini call: {e}")
+        yield f"data: {json.dumps({'type': 'error', 'message': f'與 Gemini 互動時發生錯誤: {e}'}, ensure_ascii=False)}\n\n"
         return
 
     # === 步驟 2: 執行工具並廣播事件 ===
-    assistant_message = {
-        "role": "assistant",
-        "content": None,
-        "tool_calls": list(tool_calls.values()),
-    }
-    messages.append(assistant_message)
-
-    tool_results = []
-
-    for tool_call in assistant_message["tool_calls"]:
-        tool_name = tool_call["function"]["name"]
+    # 構建 function response 給 Gemini
+    function_responses = []
+    
+    # 過濾掉無效的 function calls
+    valid_function_calls = [fc for fc in function_calls if fc is not None and hasattr(fc, 'name')]
+    
+    for function_call in valid_function_calls:
+        tool_name = function_call.name
+        tool_args = dict(function_call.args) if hasattr(function_call, 'args') else {}
 
         try:
-            tool_args = json.loads(tool_call["function"]["arguments"])
-
             # 廣播工具開始事件
             await callback_handler.on_agent_action(tool_name, tool_args)
             event = await event_queue.get()
@@ -242,53 +227,55 @@ async def stream_generator(messages: list):
                 event = await event_queue.get()
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
-                tool_results.append(
-                    {
-                        "tool_call_id": tool_call["id"],
-                        "role": "tool",
+                # 構建 function response 給 Gemini
+                function_responses.append({
+                    "function_response": {
                         "name": tool_name,
-                        "content": tool_output,
+                        "response": {"result": tool_output}
                     }
-                )
+                })
 
             else:
                 error_msg = f"找不到工具: {tool_name}"
                 yield f"data: {json.dumps({'type': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
                 return
 
-        except json.JSONDecodeError as e:
-            error_msg = f"工具 '{tool_name}' 的參數格式錯誤: {e}"
-            yield f"data: {json.dumps({'type': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
-            return
         except Exception as e:
             # 工具執行異常時，記錄錯誤但繼續處理其他工具
             print(f"工具 '{tool_name}' 執行時發生錯誤: {e}")
-            tool_results.append(
-                {
-                    "tool_call_id": tool_call["id"],
-                    "role": "tool",
+            function_responses.append({
+                "function_response": {
                     "name": tool_name,
-                    "content": f"執行工具時發生錯誤: {str(e)}",
+                    "response": {"error": f"執行工具時發生錯誤: {str(e)}"}
                 }
-            )
-            # 不要 return，繼續處理其他工具
+            })
 
-    # 將工具結果加入對話
-    messages.extend(tool_results)
+    # 將 function responses 加入對話
+    if function_responses:
+        gemini_messages.append({
+            "role": "function",
+            "parts": function_responses
+        })
 
-    # === 步驟 3: 第二次呼叫 OpenAI，生成最終答案 ===
+    # === 步驟 3: 第二次呼叫 Gemini，生成最終答案 ===
     try:
-        second_response_stream = await client.chat.completions.create(
-            model=OPENAI_MODEL,
-            messages=messages,
-            stream=True,
+        # 不需要再傳遞 tools，因為工具已經執行完畢
+        final_config = types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            temperature=0.3,
+        )
+        
+        second_response_stream = client.models.generate_content_stream(
+            model=GEMINI_MODEL,
+            contents=gemini_messages,
+            config=final_config,
         )
 
         final_content = ""
-        async for chunk in second_response_stream:
-            if content := chunk.choices[0].delta.content:
-                final_content += content
-                yield f"data: {json.dumps({'type': 'content', 'content': content}, ensure_ascii=False)}\n\n"
+        for chunk in second_response_stream:
+            if hasattr(chunk, 'text') and chunk.text:
+                final_content += chunk.text
+                yield f"data: {json.dumps({'type': 'content', 'content': chunk.text}, ensure_ascii=False)}\n\n"
 
         # 廣播最終完成事件
         await callback_handler.on_agent_finish(final_content)
@@ -296,7 +283,7 @@ async def stream_generator(messages: list):
         yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
     except Exception as e:
-        print(f"Error during second OpenAI call: {e}")
+        print(f"Error during second Gemini call: {e}")
         error_msg = f"在整合工具結果時發生錯誤: {e}"
         yield f"data: {json.dumps({'type': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
 
@@ -305,9 +292,7 @@ async def process_chat_request(messages: list) -> Dict[str, Any]:
     """
     處理聊天請求並返回完整回應的非串流版本
     """
-    system_prompt = {
-        "role": "system",
-        "content": """你是一個專業的RAG（檢索增強生成）助手。請嚴格遵循以下準則：
+    system_instruction = """你是一個專業的RAG（檢索增強生成）助手。請嚴格遵循以下準則：
 
 【核心原則】
 1. 你只能基於搜索工具返回的結果來回答問題
@@ -331,56 +316,68 @@ async def process_chat_request(messages: list) -> Dict[str, Any]:
 - 禁止基於常識或訓練數據直接回答（必須先搜索）
 - 禁止省略資訊來源的標註
 
-記住：你是RAG系統，資訊的可靠性和來源透明度是你的核心價值。""",
-    }
+記住：你是RAG系統，資訊的可靠性和來源透明度是你的核心價值。"""
 
-    if not messages or messages[0].get("role") != "system":
-        messages.insert(0, system_prompt)
+    # 轉換訊息格式為 Gemini 格式
+    gemini_messages = []
+    for msg in messages:
+        if msg.get("role") == "system":
+            continue  # 跳過 system 訊息，使用 system_instruction 代替
+        elif msg.get("role") == "user":
+            gemini_messages.append({"role": "user", "parts": [{"text": msg["content"]}]})
+        elif msg.get("role") == "assistant":
+            gemini_messages.append({"role": "model", "parts": [{"text": msg["content"]}]})
 
     tools_used = []
     final_answer = ""
     error_message = None
 
     try:
-        # 第一次呼叫 OpenAI，判斷是否需要使用工具
-        first_response = await client.chat.completions.create(
-            model=OPENAI_MODEL,
-            messages=messages,
-            tools=tools_specs,
-            tool_choice="auto",
+        # 設定 Gemini 配置
+        config = types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            tools=gemini_tools,
+            temperature=0.3,
+        )
+        
+        # 第一次呼叫 Gemini，判斷是否需要使用工具
+        first_response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=gemini_messages,
+            config=config,
         )
 
         # 檢查是否有工具呼叫
-        if first_response.choices[0].message.tool_calls:
-            # 處理工具呼叫
-            assistant_message = {
-                "role": "assistant",
-                "content": first_response.choices[0].message.content,
-                "tool_calls": first_response.choices[0].message.tool_calls,
-            }
-            messages.append(assistant_message)
+        function_calls = []
+        if hasattr(first_response, 'candidates') and first_response.candidates:
+            candidate = first_response.candidates[0]
+            if hasattr(candidate, 'content') and candidate.content:
+                if hasattr(candidate.content, 'parts'):
+                    for part in candidate.content.parts:
+                        if hasattr(part, 'function_call'):
+                            function_calls.append(part.function_call)
 
-            tool_results = []
-
-            for tool_call in assistant_message["tool_calls"]:
-                tool_name = tool_call.function.name
+        if function_calls:
+            # 構建 function response 給 Gemini
+            function_responses = []
+            
+            for function_call in function_calls:
+                tool_name = function_call.name
+                tool_args = dict(function_call.args) if hasattr(function_call, 'args') else {}
+                tools_used.append({"name": tool_name, "arguments": tool_args})
 
                 try:
-                    tool_args = json.loads(tool_call.function.arguments)
-                    tools_used.append({"name": tool_name, "arguments": tool_args})
-
                     if tool_name in available_tools:
                         function_to_call = available_tools[tool_name]
                         tool_output = function_to_call(**tool_args)
 
-                        tool_results.append(
-                            {
-                                "tool_call_id": tool_call.id,
-                                "role": "tool",
+                        # 構建 function response 給 Gemini
+                        function_responses.append({
+                            "function_response": {
                                 "name": tool_name,
-                                "content": tool_output,
+                                "response": {"result": tool_output}
                             }
-                        )
+                        })
                     else:
                         error_message = f"找不到工具: {tool_name}"
                         return {
@@ -389,13 +386,6 @@ async def process_chat_request(messages: list) -> Dict[str, Any]:
                             "error": error_message,
                         }
 
-                except json.JSONDecodeError as e:
-                    error_message = f"工具 '{tool_name}' 的參數格式錯誤: {e}"
-                    return {
-                        "answer": "",
-                        "tools_used": tools_used,
-                        "error": error_message,
-                    }
                 except Exception as e:
                     error_message = f"執行工具 '{tool_name}' 時發生錯誤: {e}"
                     return {
@@ -404,22 +394,33 @@ async def process_chat_request(messages: list) -> Dict[str, Any]:
                         "error": error_message,
                     }
 
-            # 將工具結果加入對話
-            messages.extend(tool_results)
+            # 將 function responses 加入對話
+            if function_responses:
+                gemini_messages.append({
+                    "role": "function",
+                    "parts": function_responses
+                })
 
-            # 第二次呼叫 OpenAI，生成最終答案
-            second_response = await client.chat.completions.create(
-                model=OPENAI_MODEL,
-                messages=messages,
+            # 第二次呼叫 Gemini，生成最終答案
+            final_config = types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                temperature=0.3,
+            )
+            
+            second_response = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=gemini_messages,
+                config=final_config,
             )
 
-            final_answer = second_response.choices[0].message.content
+            final_answer = second_response.text if hasattr(second_response, 'text') else "無法生成回應"
 
         else:
             # 沒有工具呼叫，直接使用第一次的回應
             final_answer = (
-                first_response.choices[0].message.content
-                or "我理解了你的問題，但目前沒有需要額外資訊來回答。"
+                first_response.text
+                if hasattr(first_response, 'text')
+                else "我理解了你的問題，但目前沒有需要額外資訊來回答。"
             )
 
     except Exception as e:

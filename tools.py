@@ -159,13 +159,16 @@ def web_search(query: str):
     return error_msg
 
 
-# 這是要傳遞給 OpenAI API 的工具列表
-# 格式必須符合 OpenAI 的要求
+# 這是要傳遞給 Gemini API 的工具列表
 available_tools = {
     "local_rag_search": local_rag_search,
     "web_search": web_search,
 }
 
+# Gemini function calling 格式的工具定義
+gemini_tools = [local_rag_search, web_search]
+
+# 為了向後兼容，保留 OpenAI 格式的工具規格（但不會使用）
 tools_specs = [
     {
         "type": "function",
