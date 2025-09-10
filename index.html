@@ -838,8 +838,11 @@
 
                 for (const line of lines) {
                     if (line.startsWith('data: ')) {
+                        const rawData = line.slice(6).trim();
+                        if (!rawData) continue; // 跳過空行
+                        
                         try {
-                            const eventData = JSON.parse(line.slice(6));
+                            const eventData = JSON.parse(rawData);
                             await handleServerEvent(eventData, responseContent, {
                                 toolLogsContent,
                                 toolLogsContainer,
@@ -849,7 +852,14 @@
                                         loadingIndicator.remove();
                                     }
                                     currentContent += content;
-                                    responseContent.innerHTML = marked.parse(currentContent);
+                                    
+                                    try {
+                                        responseContent.innerHTML = marked.parse(currentContent);
+                                    } catch (markdownError) {
+                                        console.warn('Markdown 渲染失敗:', markdownError);
+                                        // 如果 Markdown 渲染失敗，直接顯示純文字
+                                        responseContent.innerHTML = `<pre>${currentContent}</pre>`;
+                                    }
                                 },
                                 markToolsUsed: () => {
                                     if (!hasUsedTools) {
@@ -860,8 +870,58 @@
                                     }
                                 }
                             });
-                        } catch (e) {
-                            console.warn('解析 SSE 事件失敗:', e);
+                        } catch (jsonError) {
+                            console.error('JSON 解析失敗:', {
+                                error: jsonError.message,
+                                rawData: rawData.substring(0, 200), // 只記錄前200個字符
+                                line: line.substring(0, 200)
+                            });
+                            
+                            // 嘗試修復常見的JSON問題
+                            if (rawData.includes('"content":')) {
+                                try {
+                                    // 嘗試處理可能的轉義問題
+                                    const fixedData = rawData
+                                        .replace(/\\/g, '\\\\')
+                                        .replace(/"/g, '\\"')
+                                        .replace(/\\"/g, '"');
+                                    
+                                    const eventData = JSON.parse(fixedData);
+                                    console.log('JSON 修復成功，繼續處理');
+                                    await handleServerEvent(eventData, responseContent, {
+                                        toolLogsContent,
+                                        toolLogsContainer,
+                                        updateContent: (content) => {
+                                            if (loadingIndicator && loadingIndicator.parentNode) {
+                                                loadingIndicator.remove();
+                                            }
+                                            currentContent += content;
+                                            try {
+                                                responseContent.innerHTML = marked.parse(currentContent);
+                                            } catch (e) {
+                                                responseContent.innerHTML = `<pre>${currentContent}</pre>`;
+                                            }
+                                        },
+                                        markToolsUsed: () => {
+                                            if (!hasUsedTools) {
+                                                hasUsedTools = true;
+                                                toolLogsContent.innerHTML = '';
+                                                updateToolLogsForActiveUse(toolLogsContainer);
+                                            }
+                                        }
+                                    });
+                                } catch (fixError) {
+                                    console.error('JSON 修復也失敗了:', fixError);
+                                    // 顯示錯誤信息給用戶
+                                    if (loadingIndicator && loadingIndicator.parentNode) {
+                                        loadingIndicator.remove();
+                                    }
+                                    responseContent.innerHTML += '<p style="color: red;">⚠️ 接收數據時發生錯誤，部分回覆可能不完整。</p>';
+                                }
+                            } else {
+                                // 非內容數據的解析錯誤，記錄但不影響用戶體驗
+                                console.warn('跳過無效的SSE事件:', line.substring(0, 100));
+                            }
                         }
                     }
                 }

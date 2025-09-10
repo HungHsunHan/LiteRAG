@@ -1,6 +1,7 @@
 # tools.py
 import re
 import time
+import urllib.parse
 from duckduckgo_search import DDGS
 from google.genai import types
 
@@ -24,6 +25,62 @@ def local_rag_search(query: str):
 
 
 # 2. 網路搜尋工具
+def clean_url(url: str) -> str:
+    """
+    清理和驗證URL，確保其安全性和正確格式
+    """
+    if not url or not isinstance(url, str):
+        return ""
+    
+    url = url.strip()
+    
+    # 基本URL驗證
+    if not url.startswith(('http://', 'https://')):
+        return url  # 如果不是標準URL，返回原字符串
+    
+    try:
+        # 解析URL
+        parsed = urllib.parse.urlparse(url)
+        
+        # 重新組合URL，確保正確編碼
+        cleaned_url = urllib.parse.urlunparse((
+            parsed.scheme,
+            parsed.netloc,
+            urllib.parse.quote(parsed.path, safe='/-._~:/?#[]@!$&\'()*+,;='),
+            parsed.params,
+            parsed.query,
+            parsed.fragment
+        ))
+        
+        # 限制URL長度避免過長
+        if len(cleaned_url) > 200:
+            cleaned_url = cleaned_url[:197] + '...'
+            
+        return cleaned_url
+        
+    except Exception as e:
+        print(f"URL清理失敗: {e}")
+        # 如果清理失敗，返回截斷的原URL
+        return url[:100] + '...' if len(url) > 100 else url
+
+
+def clean_text_content(text: str) -> str:
+    """
+    清理文本內容，移除可能導致問題的字符
+    """
+    if not text or not isinstance(text, str):
+        return ""
+    
+    # 移除控制字符但保留基本格式字符
+    text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', text)
+    
+    # 限制長度
+    if len(text) > 500:
+        text = text[:497] + '...'
+    
+    return text.strip()
+
+
 def clean_search_query(query: str) -> str:
     """
     清理和優化搜索關鍵詞，移除可能影響搜索效果的內容
@@ -129,16 +186,22 @@ def web_search(query: str):
                 if results:
                     formatted_results = []
                     for i, result in enumerate(results[:3], 1):  # 最多顯示3個結果
-                        title = result.get("title", "無標題")
-                        body = result.get("body", "無內容摘要")
-                        href = result.get("href", "")
+                        # 清理和驗證所有字段
+                        title = clean_text_content(result.get("title", "無標題"))
+                        body = clean_text_content(result.get("body", "無內容摘要"))
+                        href = clean_url(result.get("href", ""))
 
                         print(f"結果 {i}: {title[:50]}...")
 
-                        formatted_result = f"""### 搜尋結果 {i}: {title}
-**來源**: {href}
-**摘要**: {body}
----"""
+                        # 使用更安全的格式化方式，避免markdown解析問題
+                        formatted_result = f"""**搜尋結果 {i}**: {title}
+
+**網址**: {href}
+
+**內容摘要**: {body}
+
+---
+"""
                         formatted_results.append(formatted_result)
 
                     final_result = "\n\n".join(formatted_results)
