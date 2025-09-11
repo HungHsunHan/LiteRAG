@@ -1,16 +1,16 @@
 # rag_setup.py
-import os
 import json
+import os
 import threading
 from datetime import datetime
-from typing import Optional, List
+from typing import List, Optional
 
 from dotenv import load_dotenv
+from google import genai
+from google.genai import types
 from langchain.text_splitter import MarkdownHeaderTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_core.embeddings import Embeddings
-from google import genai
-from google.genai import types
 
 load_dotenv(override=True)
 
@@ -36,7 +36,8 @@ class GeminiEmbeddings(Embeddings):
                 # The correct way to get the embedding response
                 result = self.client.models.embed_content(
                     model=self.model,
-                    contents=text
+                    contents=text,
+                    config=types.EmbedContentConfig(task_type="RETRIEVAL_DOCUMENT"),
                 )
                 # Correctly access the vector via result.embeddings[0].values
                 embeddings.append(result.embeddings[0].values)
@@ -52,7 +53,8 @@ class GeminiEmbeddings(Embeddings):
             # The correct way to get the embedding response
             result = self.client.models.embed_content(
                 model=self.model,
-                contents=text
+                contents=text,
+                config=types.EmbedContentConfig(task_type="QUESTION_ANSWERING"),
             )
             # Correctly access the vector via result.embeddings[0].values
             return result.embeddings[0].values
@@ -114,7 +116,7 @@ class RAGManager:
 
                 context = "\n\n---\n\n".join(
                     [
-                        f"來源: {doc.metadata.get('Header 2', '')} > {doc.metadata.get('Header 3', '')}\n內容: {doc.page_content}"
+                        f"來源: 藝術品名稱:{doc.metadata.get('Header 1', '')} > {doc.metadata.get('Header 2', '')} > {doc.metadata.get('Header 3', '')}\n內容: {doc.page_content}\n\n"
                         for doc in relevant_docs
                     ]
                 )
